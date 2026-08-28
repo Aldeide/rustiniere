@@ -1,61 +1,47 @@
-# 🦀 Rustinière - Rust Dedicated Server Administration Suite
+# 🦀 Rustinière - Standalone Desktop Administration Suite for Rust
 
-[![Deploy to GitHub Pages](https://github.com/Aldeide/rustiniere/actions/workflows/deploy.yml/badge.svg)](https://github.com/Aldeide/rustiniere/actions/workflows/deploy.yml)
-
-A modern, high-performance, dark-themed web administration tool for Facepunch Rust dedicated servers, inspired by RustAdmin and WebRCON.
+A modern, high-performance standalone Windows desktop software for Facepunch Rust dedicated server administrators, inspired by RustAdmin.
 
 ---
 
-## ⚡ Core Features
+## ⚡ Key Desktop Highlights
 
-- **🌐 100% Serverless / Browser-Native WebRCON**: Directly connects via browser WebSocket (`ws://<ip>:<port>/<password>`) with zero backend hosting required.
-- **🗺️ Interactive Live Island Map & Player Radar**:
-  - Full 2D island map with biomes (Arctic snow, Temperate forests, Arid desert).
-  - Alphanumeric Rust Grid (`A0` to `Z24`) with live cursor coordinate HUD.
-  - Live player markers with health indicators, steam names, and click-to-teleport actions.
-  - Event trackers for Patrol Helicopter and Cargo Ship.
-- **⚡ Triggered Commands Engine (Reactive Automation)**:
-  - **Chat Command Triggers**: Match chat triggers (`!pop`, `!discord`, `!wipe`, `!rules`, `!help`, `!kit`) with automatic chat responses.
-  - **Dynamic Placeholders**: `{online_players}`, `{pop}`, `{max_players}`, `{queue}`, `{fps}`, `{hostname}`, `{player}`, `{steamid}`, `{message}`, `{time}`.
-  - **Auto-Moderation**: Automatic profanity/slur filter with auto-mute, auto-kick, or warnings.
-  - **Player Lifecycle Events**: Auto-greeting broadcasts on connect or leave.
-  - **Monument & Event Spawns**: Automated announcements when Patrol Helicopters, Cargo Ships, Bradley APCs, or Airdrops enter the map.
+- **🖥️ Standalone Windows Desktop Software (`.exe`)**: Launches natively with zero external dependencies, no browser tabs, and no terminal windows.
+- **🛡️ Direct Native WebRCON**: Connects straight from your PC to any Rust server port (`ws://<ip>:<port>/<password>`) with zero mixed-content or SSL restrictions.
+- **💾 Permanent Physical File Persistence (`rustiniere_config.json`)**: All server profiles, triggers, and scheduled tasks are permanently saved in a physical JSON file on your machine.
+- **🗺️ Interactive 2D Live Island Map & Player Radar**:
+  - Live coordinates HUD with standard Rust Alphanumeric Grid (`A0` to `Z24`).
+  - Real-time player markers with HP, Steam avatars, and click-to-teleport actions.
+  - Custom Map Image loader (supports direct URLs, Rust-IO auto-presets, and custom PNG/JPG map file uploads from your PC).
+  - Event radar tracking Patrol Helicopters, Cargo Ships, and Supply Drops.
+- **⚡ Reactive Triggered Commands Engine**:
+  - Auto-responders for in-game chat (`!pop`, `!discord`, `!wipe`, `!rules`, `!help`).
+  - Dynamic live variable substitution (`{online_players}`, `{max_players}`, `{queue}`, `{fps}`, `{hostname}`, `{player}`, `{steamid}`).
+  - Automated toxic language filter with auto-mute or kick actions.
+  - Player join/leave greeting broadcasts and monument spawn announcements.
 - **⏱️ Automated Task Scheduler**:
-  - Timed recurring server broadcasts (`say "[ANNOUNCEMENT] ..."`).
-  - Periodic world save routines (`save`).
-  - Customizable interval timers with instant manual trigger option (`Run Now`).
-- **📊 Real-Time Server Telemetry & Dashboard**:
-  - Live FPS and online player count area charts.
-  - Quick power action buttons (`save`, `supply.call`, `heli.call`, `env.time 12`, `weather.clear`, `gc.collect`).
-- **💻 Interactive WebRCON Console**:
-  - Streaming server log with syntax color-coding and filter buttons (Chat, Warnings, Errors, Combat).
-  - Autocomplete quick command chips and command history (Up/Down arrow keys).
-- **👥 Player Management Roster**:
-  - Player list with Steam avatars, ping, health, connected duration, and IP addresses.
-  - Instant moderation actions: Kick, Ban, Mute/Unmute, Teleport, Give Item, Strip Inventory, and Kill.
-- **📦 Categorized Rust Item Giver**:
-  - Searchable catalog of Rust items by category (Weapons, Ammo, Resources, Medical, Attire, Construction, Traps, Vehicles).
-  - One-click give to a specific player or all online players.
-- **🛡️ Server Ban Manager**:
-  - Inspect active bans (`banlistex`), add manual SteamID bans with custom reasons and expiration, and one-click unban.
+  - Background timers for periodic world saves (`save`) and scheduled community announcements.
+- **💻 Clean & Readable WebRCON Console**:
+  - Background telemetry queries are filtered so your log stays clean.
+  - Pretty-printed JSON formatting for `serverinfo`, `playerlist`, and `status`.
+  - Color-coded badges for `[CHAT]`, `[PLAYER]`, `[COMBAT]`, `[WARN]`, and `[ERROR]`.
+  - One-click copy, search filter, and log download (`.txt`).
+- **👥 Player & Ban Management**:
+  - Real-time roster with health, ping, and connected duration.
+  - One-click Moderation (Kick, Ban, Mute/Unmute, Teleport, Give Item, Strip Inventory, Kill).
+- **📦 Rust Item Giver Database**:
+  - Categorized item spawner (Weapons, Ammunition, Resources, Medical, Attire, Construction, Traps, Vehicles).
 
 ---
 
-## 🚀 Live Demo / GitHub Pages Deployment
+## 🚀 Quick Launch
 
-The application is deployed to GitHub Pages at:
-**`https://aldeide.github.io/rustiniere/`**
+### 1. Instant Desktop Launch
+Double-click:
+📁 **`start.bat`**
 
-### Publishing via GitHub Actions
-Pushing to the `main` branch of `https://github.com/Aldeide/rustiniere` will automatically build and publish the app.
-
----
-
-## 🛡️ Browser Mixed Content Tip (for HTTPS)
-
-Because GitHub Pages is served over `https://`, browsers may block unencrypted `ws://` (non-SSL) WebSockets by default:
-1. Open your published site.
-2. Click the **padlock / tune icon** to the left of the browser address bar.
-3. Click **Site Settings**.
-4. Set **Insecure content** to **Allow**.
-5. Refresh the page to connect directly to any Rust server!
+### 2. Package Standalone `.exe`
+```bash
+npm run dist
+```
+Generates a portable executable in `dist-desktop/Rustiniere 1.0.0.exe`.
