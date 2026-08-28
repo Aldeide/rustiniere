@@ -1,12 +1,32 @@
 {
   "name": "rustiniere",
   "version": "1.0.0",
-  "description": "Full-featured web administration tool for Rust dedicated servers",
+  "description": "Rustinière - Desktop Administration Suite for Rust Dedicated Servers",
+  "main": "electron/main.cjs",
+  "author": "Aldeide",
   "scripts": {
-    "start": "node server/src/index.js",
-    "dev:server": "npm --prefix server run dev",
-    "dev:client": "npm --prefix client run dev",
-    "build": "npm --prefix client run build"
+    "desktop": "electron .",
+    "build:client": "npm --prefix client run build",
+    "dist": "npm run build:client && electron-builder --win portable",
+    "dist:installer": "npm run build:client && electron-builder --win nsis"
   },
-  "keywords": ["rust", "rcon", "webrcon", "rustadmin", "server-management"]
+  "build": {
+    "appId": "com.aldeide.rustiniere",
+    "productName": "Rustiniere",
+    "directories": {
+      "output": "dist-desktop"
+    },
+    "files": [
+      "electron/**/*",
+      "client/dist/**/*"
+    ],
+    "win": {
+      "target": ["portable", "nsis"]
+    }
+  },
+  "devDependencies": {
+    "electron": "^33.2.1",
+    "electron-builder": "^25.1.8"
+  },
+  "keywords": ["rust", "rcon", "webrcon", "rustadmin", "server-management", "desktop"]
 }
