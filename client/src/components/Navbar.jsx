@@ -14,7 +14,8 @@ import {
   AlertCircle, 
   RefreshCw,
   Power,
-  Map as MapIcon
+  Map as MapIcon,
+  Settings
 } from 'lucide-react';
 
 export default function Navbar({ 
@@ -85,6 +86,16 @@ export default function Navbar({
               >
                 <Plus className="w-4 h-4" />
               </button>
+
+              {activeServer && (
+                <button 
+                  onClick={() => onOpenServerModal(activeServer)}
+                  title={`Edit "${activeServer.name}" Settings`}
+                  className="p-1.5 rounded-md hover:bg-[#282a33] text-[#a0a3af] hover:text-[#fb923c] transition-colors"
+                >
+                  <Settings className="w-4 h-4" />
+                </button>
+              )}
             </div>
 
             {/* Live Status Pill */}

@@ -218,6 +218,7 @@ export default function App() {
             players={players}
             mapEvents={mapEvents}
             serverInfo={serverInfo}
+            activeServer={activeServer}
             onSendCommand={handleSendCommand}
             onGiveItemToPlayer={handleGiveItemToPlayer}
           />

@@ -17,7 +17,13 @@ import {
   Navigation,
   Compass,
   Crosshair,
-  Maximize2
+  Maximize2,
+  Image as ImageIcon,
+  Upload,
+  Settings2,
+  Eye,
+  EyeOff,
+  Crosshair as TargetIcon
 } from 'lucide-react';
 
 const MONUMENTS = [
@@ -39,14 +45,27 @@ const MONUMENTS = [
   { id: 'sewer', name: 'Sewer Branch', type: 'monument', tier: 'tier1', x: -100, z: 150, icon: '🧪' }
 ];
 
+// Helper to safely extract coordinates from any Facepunch or Oxide player schema
+export const getPlayerCoords = (player) => {
+  if (!player) return null;
+  const p = player.Position || player.Pos || player.position || player.pos;
+  if (!p) return null;
+  const x = typeof p.x === 'number' ? p.x : (typeof p.X === 'number' ? p.X : parseFloat(p.x || p.X || 0));
+  const z = typeof p.z === 'number' ? p.z : (typeof p.Z === 'number' ? p.Z : parseFloat(p.z || p.Z || 0));
+  const y = typeof p.y === 'number' ? p.y : (typeof p.Y === 'number' ? p.Y : parseFloat(p.y || p.Y || 0));
+  if (isNaN(x) || isNaN(z)) return null;
+  return { x, y, z };
+};
+
 export default function RustMap({ 
   players = [], 
   mapEvents = [], 
   serverInfo, 
+  activeServer,
   onSendCommand, 
   onGiveItemToPlayer 
 }) {
-  const worldSize = serverInfo?.WorldSize || 4000;
+  const worldSize = Number(serverInfo?.WorldSize) || 4000;
   const halfSize = worldSize / 2;
 
   const [zoom, setZoom] = useState(1);
@@ -58,32 +77,73 @@ export default function RustMap({
   const [clickedCoord, setClickedCoord] = useState(null);
   const [hoverCoord, setHoverCoord] = useState(null);
   const [searchQuery, setSearchQuery] = useState('');
+  const [actionStatus, setActionStatus] = useState(null);
 
   // Layer toggles
   const [showGrid, setShowGrid] = useState(true);
   const [showMonuments, setShowMonuments] = useState(true);
   const [showPlayerLabels, setShowPlayerLabels] = useState(true);
   const [showEvents, setShowEvents] = useState(true);
+  const [showRoster, setShowRoster] = useState(true);
+
+  // Map Image Customization
+  const [isMapSettingsOpen, setIsMapSettingsOpen] = useState(false);
+  const [mapImageUrl, setMapImageUrl] = useState('');
+  const [imageOpacity, setImageOpacity] = useState(100);
+  const [imageError, setImageError] = useState(false);
 
   const containerRef = useRef(null);
+  const fileInputRef = useRef(null);
+
+  // Load saved map image for this server
+  useEffect(() => {
+    if (activeServer) {
+      const savedUrl = localStorage.getItem(`rustiniere_map_image_${activeServer.id}`) || '';
+      setMapImageUrl(savedUrl);
+      setImageError(false);
+    }
+  }, [activeServer?.id]);
+
+  const handleSaveMapImage = (url) => {
+    setMapImageUrl(url);
+    setImageError(false);
+    if (activeServer) {
+      localStorage.setItem(`rustiniere_map_image_${activeServer.id}`, url);
+    }
+  };
+
+  const handleFileUpload = (e) => {
+    const file = e.target.files?.[0];
+    if (file) {
+      const reader = new FileReader();
+      reader.onload = (event) => {
+        const result = event.target?.result;
+        if (typeof result === 'string') {
+          handleSaveMapImage(result);
+        }
+      };
+      reader.readAsDataURL(file);
+    }
+  };
 
   // Convert Rust in-game (x, z) to percentage (0% to 100%) on the square map
-  // Rust coordinates: X is -halfSize to +halfSize (West to East), Z is -halfSize to +halfSize (South to North)
   const toMapPercent = (x, z) => {
     const px = ((x + halfSize) / worldSize) * 100;
-    const py = ((-z + halfSize) / worldSize) * 100; // Flip Y because map top is North (+Z)
+    const py = ((-z + halfSize) / worldSize) * 100; // Invert Y because North (+Z) is at the top
     return {
       left: `${Math.max(0, Math.min(100, px))}%`,
-      top: `${Math.max(0, Math.min(100, py))}%`
+      top: `${Math.max(0, Math.min(100, py))}%`,
+      numX: px,
+      numY: py
     };
   };
 
   // Convert Rust coordinate (X, Z) to standard alphanumeric grid (e.g. G14)
   const toGridCode = (x, z) => {
-    const gridSize = 146.3; // Standard Rust grid cell size
+    const gridSize = 146.3; // Standard Rust grid cell size (146.3m)
     const cols = 'ABCDEFGHIJKLMNOPQRSTUVWXYZAAABACADAE';
-    const colIdx = Math.floor((x + halfSize) / gridSize);
-    const rowIdx = Math.floor((-z + halfSize) / gridSize);
+    const colIdx = Math.max(0, Math.floor((x + halfSize) / gridSize));
+    const rowIdx = Math.max(0, Math.floor((-z + halfSize) / gridSize));
     const colChar = cols[colIdx] || 'A';
     return `${colChar}${rowIdx}`;
   };
@@ -92,7 +152,7 @@ export default function RustMap({
   const handleWheel = (e) => {
     e.preventDefault();
     const delta = e.deltaY < 0 ? 0.15 : -0.15;
-    setZoom(prev => Math.min(3.5, Math.max(0.6, prev + delta)));
+    setZoom(prev => Math.min(4.0, Math.max(0.5, prev + delta)));
   };
 
   const handleMouseDown = (e) => {
@@ -112,17 +172,19 @@ export default function RustMap({
 
     if (containerRef.current) {
       const rect = containerRef.current.getBoundingClientRect();
-      const clickX = (e.clientX - rect.left - pan.x) / zoom;
-      const clickY = (e.clientY - rect.top - pan.y) / zoom;
-      const size = rect.width;
+      const mapBox = 800 * zoom;
+      const originX = rect.left + rect.width / 2 + pan.x - mapBox / 2;
+      const originY = rect.top + rect.height / 2 + pan.y - mapBox / 2;
 
-      const normX = clickX / size;
-      const normY = clickY / size;
+      const normX = (e.clientX - originX) / mapBox;
+      const normY = (e.clientY - originY) / mapBox;
 
       if (normX >= 0 && normX <= 1 && normY >= 0 && normY <= 1) {
         const rustX = Math.round((normX * worldSize) - halfSize);
         const rustZ = Math.round(halfSize - (normY * worldSize));
         setHoverCoord({ x: rustX, z: rustZ, grid: toGridCode(rustX, rustZ) });
+      } else {
+        setHoverCoord(null);
       }
     }
   };
@@ -138,12 +200,12 @@ export default function RustMap({
 
     if (containerRef.current) {
       const rect = containerRef.current.getBoundingClientRect();
-      const clickX = (e.clientX - rect.left - pan.x) / zoom;
-      const clickY = (e.clientY - rect.top - pan.y) / zoom;
-      const size = rect.width;
+      const mapBox = 800 * zoom;
+      const originX = rect.left + rect.width / 2 + pan.x - mapBox / 2;
+      const originY = rect.top + rect.height / 2 + pan.y - mapBox / 2;
 
-      const normX = clickX / size;
-      const normY = clickY / size;
+      const normX = (e.clientX - originX) / mapBox;
+      const normY = (e.clientY - originY) / mapBox;
 
       if (normX >= 0 && normX <= 1 && normY >= 0 && normY <= 1) {
         const rustX = Math.round((normX * worldSize) - halfSize);
@@ -151,9 +213,7 @@ export default function RustMap({
         setClickedCoord({
           x: rustX,
           z: rustZ,
-          grid: toGridCode(rustX, rustZ),
-          screenX: e.clientX - rect.left,
-          screenY: e.clientY - rect.top
+          grid: toGridCode(rustX, rustZ)
         });
         setSelectedPlayer(null);
       }
@@ -167,69 +227,78 @@ export default function RustMap({
     setClickedCoord(null);
   };
 
-  const focusPlayer = (player) => {
-    if (!player || !player.Pos) return;
+  const centerOnPlayer = (player) => {
+    const coords = getPlayerCoords(player);
+    if (!coords) return;
+
     setSelectedPlayer(player);
     setClickedCoord(null);
-    setZoom(2.2);
-    // Center pan on player
-    const pos = toMapPercent(player.Pos.x, player.Pos.z);
-    const px = (parseFloat(pos.left) / 100) * 800;
-    const py = (parseFloat(pos.top) / 100) * 800;
-    setPan({
-      x: 400 - px * 2.2,
-      y: 400 - py * 2.2
+
+    const normX = (coords.x + halfSize) / worldSize;
+    const normY = (-coords.z + halfSize) / worldSize;
+
+    const targetPanX = (0.5 - normX) * 800 * zoom;
+    const targetPanY = (0.5 - normY) * 800 * zoom;
+
+    setPan({ x: targetPanX, y: targetPanY });
+    setZoom(1.8);
+  };
+
+  const triggerAction = async (command, label) => {
+    try {
+      await onSendCommand(command);
+      setActionStatus(`Executed: ${label}`);
+      setTimeout(() => setActionStatus(null), 3000);
+    } catch (e) {
+      setActionStatus(`Failed: ${e.message}`);
+      setTimeout(() => setActionStatus(null), 3000);
+    }
+  };
+
+  // Players matching search query
+  const visiblePlayers = useMemo(() => {
+    return players.filter(p => {
+      const name = (p.DisplayName || '').toLowerCase();
+      const steamid = (p.SteamID || '').toLowerCase();
+      const query = searchQuery.toLowerCase();
+      return name.includes(query) || steamid.includes(query);
     });
-  };
-
-  const teleportAdminToCoord = async (x, z) => {
-    await onSendCommand(`teleportpos ${x} 20 ${z}`);
-    setClickedCoord(null);
-  };
-
-  const spawnAirdropAtCoord = async (x, z) => {
-    await onSendCommand(`supply.drop ${x} ${z}`);
-    setClickedCoord(null);
-  };
-
-  const filteredPlayers = players.filter(p => {
-    if (!searchQuery) return true;
-    const q = searchQuery.toLowerCase();
-    return p.DisplayName?.toLowerCase().includes(q) || p.SteamID?.includes(q);
-  });
+  }, [players, searchQuery]);
 
   return (
-    <div className="flex flex-col lg:flex-row gap-5 h-[calc(100vh-140px)] select-none">
+    <div className="flex h-[calc(100vh-140px)] bg-[#101115] rounded-2xl border border-[#23242c] overflow-hidden shadow-2xl relative select-none">
       
-      {/* Left Column: Interactive Map Canvas */}
-      <div className="flex-1 bg-[#0b0c10] rounded-2xl border border-[#23242c] overflow-hidden shadow-2xl relative flex flex-col">
+      {/* Main Map Viewport */}
+      <div className="flex-1 flex flex-col relative overflow-hidden">
         
-        {/* Top Floating Map Toolbar */}
-        <div className="absolute top-4 left-4 right-4 z-20 flex flex-wrap items-center justify-between pointer-events-none gap-2">
+        {/* Top Floating Map Controls Toolbar */}
+        <div className="absolute top-4 left-4 right-4 z-30 flex flex-wrap items-center justify-between gap-3 pointer-events-none">
           
           {/* Coordinates HUD */}
-          <div className="pointer-events-auto flex items-center gap-2 bg-[#14161de6] backdrop-blur-md px-3.5 py-2 rounded-xl border border-[#272935] shadow-lg text-xs font-mono">
+          <div className="flex items-center gap-2 pointer-events-auto bg-[#16171ee6] backdrop-blur-md px-3.5 py-2 rounded-xl border border-[#282a36] shadow-xl">
             <Compass className="w-4 h-4 text-[#cd4628]" />
-            <div>
-              <span className="text-[#8e909a]">Cursor: </span>
-              {hoverCoord ? (
-                <strong className="text-white">
-                  Grid <span className="text-[#fb923c]">{hoverCoord.grid}</span> (X: {hoverCoord.x}, Z: {hoverCoord.z})
-                </strong>
-              ) : (
-                <span className="text-[#5e616f]">Hover map</span>
-              )}
+            <div className="flex items-center gap-3 font-mono text-xs">
+              <span className="text-[#8e909a]">
+                Grid: <strong className="text-[#fb923c] font-bold text-sm">{hoverCoord?.grid || '---'}</strong>
+              </span>
+              <span className="text-[#595c6c]">|</span>
+              <span className="text-[#8e909a]">
+                X: <strong className="text-white">{hoverCoord ? hoverCoord.x : '---'}</strong> Z: <strong className="text-white">{hoverCoord ? hoverCoord.z : '---'}</strong>
+              </span>
+              <span className="text-[#595c6c]">|</span>
+              <span className="text-[#60a5fa] text-[11px]">
+                {worldSize}m Map
+              </span>
             </div>
           </div>
 
-          {/* Quick Layer Toggles & Zoom Controls */}
-          <div className="pointer-events-auto flex items-center gap-1.5 bg-[#14161de6] backdrop-blur-md p-1 rounded-xl border border-[#272935] shadow-lg">
-            
+          {/* Layer & Tool Controls */}
+          <div className="flex items-center gap-1.5 pointer-events-auto bg-[#16171ee6] backdrop-blur-md p-1.5 rounded-xl border border-[#282a36] shadow-xl">
             <button
               onClick={() => setShowGrid(!showGrid)}
               title="Toggle Grid Lines"
               className={`px-2.5 py-1.5 rounded-lg text-xs font-bold transition-colors ${
-                showGrid ? 'bg-[#cd4628] text-white' : 'text-[#8e909a] hover:text-white'
+                showGrid ? 'bg-[#cd4628] text-white shadow' : 'text-[#8e909a] hover:text-white'
               }`}
             >
               Grid
@@ -237,9 +306,9 @@ export default function RustMap({
 
             <button
               onClick={() => setShowMonuments(!showMonuments)}
-              title="Toggle Monuments"
+              title="Toggle Monument Markers"
               className={`px-2.5 py-1.5 rounded-lg text-xs font-bold transition-colors ${
-                showMonuments ? 'bg-[#cd4628] text-white' : 'text-[#8e909a] hover:text-white'
+                showMonuments ? 'bg-[#cd4628] text-white shadow' : 'text-[#8e909a] hover:text-white'
               }`}
             >
               Monuments
@@ -247,9 +316,9 @@ export default function RustMap({
 
             <button
               onClick={() => setShowPlayerLabels(!showPlayerLabels)}
-              title="Toggle Player Names"
+              title="Toggle Player Names & Health"
               className={`px-2.5 py-1.5 rounded-lg text-xs font-bold transition-colors ${
-                showPlayerLabels ? 'bg-[#cd4628] text-white' : 'text-[#8e909a] hover:text-white'
+                showPlayerLabels ? 'bg-[#cd4628] text-white shadow' : 'text-[#8e909a] hover:text-white'
               }`}
             >
               Names
@@ -259,7 +328,7 @@ export default function RustMap({
               onClick={() => setShowEvents(!showEvents)}
               title="Toggle Heli & Cargo Trackers"
               className={`px-2.5 py-1.5 rounded-lg text-xs font-bold transition-colors ${
-                showEvents ? 'bg-[#cd4628] text-white' : 'text-[#8e909a] hover:text-white'
+                showEvents ? 'bg-[#cd4628] text-white shadow' : 'text-[#8e909a] hover:text-white'
               }`}
             >
               Events
@@ -268,7 +337,29 @@ export default function RustMap({
             <div className="w-[1px] h-4 bg-[#2b2d38] mx-1" />
 
             <button
-              onClick={() => setZoom(prev => Math.min(3.5, prev + 0.3))}
+              onClick={() => setIsMapSettingsOpen(true)}
+              className={`p-1.5 rounded-lg transition-colors ${
+                mapImageUrl ? 'text-[#38bdf8] bg-[#1a2c3d]' : 'text-[#8e909a] hover:text-white hover:bg-[#20222a]'
+              }`}
+              title="Map Image Settings / Custom Map Render"
+            >
+              <ImageIcon className="w-4 h-4" />
+            </button>
+
+            <button
+              onClick={() => setShowRoster(!showRoster)}
+              className={`p-1.5 rounded-lg transition-colors ${
+                showRoster ? 'text-[#4ade80] bg-[#162e22]' : 'text-[#8e909a] hover:text-white hover:bg-[#20222a]'
+              }`}
+              title="Toggle Player Radar Drawer"
+            >
+              <Users className="w-4 h-4" />
+            </button>
+
+            <div className="w-[1px] h-4 bg-[#2b2d38] mx-1" />
+
+            <button
+              onClick={() => setZoom(prev => Math.min(4.0, prev + 0.3))}
               className="p-1.5 rounded-lg text-[#8e909a] hover:text-white hover:bg-[#20222a] transition-colors"
               title="Zoom In"
             >
@@ -276,7 +367,7 @@ export default function RustMap({
             </button>
 
             <button
-              onClick={() => setZoom(prev => Math.max(0.6, prev - 0.3))}
+              onClick={() => setZoom(prev => Math.max(0.5, prev - 0.3))}
               className="p-1.5 rounded-lg text-[#8e909a] hover:text-white hover:bg-[#20222a] transition-colors"
               title="Zoom Out"
             >
@@ -294,6 +385,13 @@ export default function RustMap({
 
         </div>
 
+        {/* Action Status Notification Toast */}
+        {actionStatus && (
+          <div className="absolute top-20 left-1/2 -translate-x-1/2 z-40 px-4 py-2 rounded-xl bg-[#1e1b15] border border-[#d97706] text-xs font-bold text-[#fde68a] shadow-2xl animate-fade-in">
+            {actionStatus}
+          </div>
+        )}
+
         {/* Map Viewport Area */}
         <div 
           ref={containerRef}
@@ -309,36 +407,48 @@ export default function RustMap({
             style={{
               transform: `translate(${pan.x}px, ${pan.y}px) scale(${zoom})`,
               transformOrigin: 'center center',
-              transition: isDragging ? 'none' : 'transform 0.15s ease-out',
+              transition: isDragging ? 'none' : 'transform 0.1s ease-out',
               width: '800px',
               height: '800px'
             }}
             className="relative select-none shadow-2xl rounded-3xl overflow-hidden border border-[#1e3448]"
           >
             
-            {/* 1. Procedural Rust Island Background */}
-            <div className="absolute inset-0 bg-[#0c1f2e]">
-              {/* Subtle Ocean Waves */}
-              <div className="absolute inset-0 opacity-15 bg-[radial-gradient(#38bdf8_1px,transparent_1px)] [background-size:24px_24px]" />
-
-              {/* Island Landmass Contour */}
-              <div 
-                className="absolute inset-[8%] rounded-[48%_52%_45%_55%/50%_45%_55%_50%] bg-[#1a3826] border-[16px] border-[#a39462]/35 shadow-inner"
-                style={{
-                  background: 'radial-gradient(ellipse at 50% 30%, #475569 0%, #1e3a2b 40%, #172e22 75%, #a39462 100%)'
-                }}
-              >
-                {/* Northern Snow Biome */}
-                <div className="absolute top-0 inset-x-0 h-44 rounded-t-[50%] bg-gradient-to-b from-[#e2e8f0]/40 to-transparent pointer-events-none" />
-
-                {/* Southern Desert Biome */}
-                <div className="absolute bottom-0 inset-x-0 h-44 rounded-b-[50%] bg-gradient-to-t from-[#ca8a04]/25 to-transparent pointer-events-none" />
-
-                {/* Mountain Ridge Highlights */}
-                <div className="absolute top-1/3 left-1/4 w-40 h-24 rounded-full bg-[#334155]/60 blur-md pointer-events-none" />
-                <div className="absolute top-1/2 right-1/4 w-48 h-32 rounded-full bg-[#334155]/60 blur-md pointer-events-none" />
+            {/* 1. Map Image or Procedural Terrain Background */}
+            {mapImageUrl && !imageError ? (
+              <div className="absolute inset-0 bg-[#07131e]">
+                <img 
+                  src={mapImageUrl} 
+                  alt="Rust Map Render" 
+                  onError={() => setImageError(true)}
+                  style={{ opacity: imageOpacity / 100 }}
+                  className="w-full h-full object-cover select-none pointer-events-none"
+                />
               </div>
-            </div>
+            ) : (
+              <div className="absolute inset-0 bg-[#0c1f2e]">
+                {/* Subtle Ocean Waves */}
+                <div className="absolute inset-0 opacity-20 bg-[radial-gradient(#38bdf8_1px,transparent_1px)] [background-size:24px_24px]" />
+
+                {/* Island Landmass Contour */}
+                <div 
+                  className="absolute inset-[6%] rounded-[48%_52%_45%_55%/50%_45%_55%_50%] bg-[#1a3826] border-[16px] border-[#a39462]/35 shadow-inner"
+                  style={{
+                    background: 'radial-gradient(ellipse at 50% 30%, #475569 0%, #1e3a2b 40%, #172e22 75%, #a39462 100%)'
+                  }}
+                >
+                  {/* Northern Snow Biome */}
+                  <div className="absolute top-0 inset-x-0 h-48 rounded-t-[50%] bg-gradient-to-b from-[#e2e8f0]/40 to-transparent pointer-events-none" />
+
+                  {/* Southern Desert Biome */}
+                  <div className="absolute bottom-0 inset-x-0 h-48 rounded-b-[50%] bg-gradient-to-t from-[#ca8a04]/30 to-transparent pointer-events-none" />
+
+                  {/* Mountain Highlights */}
+                  <div className="absolute top-1/3 left-1/4 w-44 h-28 rounded-full bg-[#334155]/60 blur-md pointer-events-none" />
+                  <div className="absolute top-1/2 right-1/4 w-52 h-36 rounded-full bg-[#334155]/60 blur-md pointer-events-none" />
+                </div>
+              </div>
+            )}
 
             {/* 2. Standard Rust Alphanumeric Grid Lines */}
             {showGrid && (
@@ -353,7 +463,7 @@ export default function RustMap({
                           key={c} 
                           className="w-[50px] border-r border-[#38bdf8]/15 p-1 flex items-start justify-start"
                         >
-                          <span className="text-[7px] font-mono text-[#38bdf8]/35 font-bold">
+                          <span className="text-[8px] font-mono font-bold text-[#38bdf8]/40 select-none">
                             {cellCode}
                           </span>
                         </div>
@@ -364,76 +474,87 @@ export default function RustMap({
               </div>
             )}
 
-            {/* 3. Major Rust Monuments */}
-            {showMonuments && MONUMENTS.map(m => {
-              const pos = toMapPercent(m.x, m.z);
+            {/* 3. Monuments & Landmarks */}
+            {showMonuments && MONUMENTS.map(mon => {
+              const pos = toMapPercent(mon.x, mon.z);
               return (
                 <div
-                  key={m.id}
+                  key={mon.id}
                   style={{ left: pos.left, top: pos.top }}
-                  className="absolute -translate-x-1/2 -translate-y-1/2 flex flex-col items-center pointer-events-none z-10"
+                  className="interactive-marker absolute -translate-x-1/2 -translate-y-1/2 flex flex-col items-center pointer-events-auto cursor-pointer group z-10"
                 >
-                  <div className="w-6 h-6 rounded-full bg-[#181a22]/90 border border-[#f59e0b]/60 flex items-center justify-center text-xs shadow-md">
-                    <span>{m.icon}</span>
+                  <div className={`w-6 h-6 rounded-lg flex items-center justify-center text-xs shadow-lg border transition-transform group-hover:scale-125 ${
+                    mon.tier === 'tier3' 
+                      ? 'bg-[#cd4628]/80 border-[#ea580c]' 
+                      : mon.tier === 'tier2'
+                      ? 'bg-[#2563eb]/80 border-[#60a5fa]'
+                      : mon.tier === 'safe'
+                      ? 'bg-[#16a34a]/80 border-[#4ade80]'
+                      : 'bg-[#475569]/80 border-[#94a3b8]'
+                  }`}>
+                    <span>{mon.icon}</span>
                   </div>
-                  <span className="mt-0.5 text-[8px] font-extrabold uppercase px-1 py-0.2 rounded bg-black/75 text-[#fcd34d] border border-black whitespace-nowrap shadow">
-                    {m.name}
+                  <span className="mt-0.5 text-[8px] font-bold px-1.5 py-0.2 rounded bg-black/80 text-white border border-[#2f313c] whitespace-nowrap opacity-75 group-hover:opacity-100 shadow transition-opacity">
+                    {mon.name}
                   </span>
                 </div>
               );
             })}
 
-            {/* 4. Active World Events (Patrol Heli & Cargo Ship) */}
+            {/* 4. Live Game Events (Heli / Cargo / Airdrops) */}
             {showEvents && mapEvents.map(evt => {
-              const pos = toMapPercent(evt.x, evt.z);
+              const pos = toMapPercent(evt.x || 0, evt.z || 0);
               return (
                 <div
                   key={evt.id}
                   style={{ left: pos.left, top: pos.top }}
-                  className="absolute -translate-x-1/2 -translate-y-1/2 flex flex-col items-center pointer-events-none z-15 transition-all duration-1000"
+                  className="interactive-marker absolute -translate-x-1/2 -translate-y-1/2 flex flex-col items-center pointer-events-auto cursor-pointer group z-20 animate-bounce"
                 >
-                  <div className={`w-8 h-8 rounded-full flex items-center justify-center text-sm shadow-xl animate-pulse ${
-                    evt.type === 'heli' ? 'bg-[#7f1d1d] text-[#f87171] border-2 border-[#ef4444]' : 'bg-[#1e3a5f] text-[#60a5fa] border-2 border-[#3b82f6]'
-                  }`}>
-                    {evt.type === 'heli' ? '🚁' : '🚢'}
+                  <div className="w-8 h-8 rounded-full bg-[#e11d48] text-white flex items-center justify-center shadow-lg shadow-rose-500/40 border-2 border-white ring-4 ring-rose-500/30">
+                    {evt.type === 'heli' ? '🚁' : evt.type === 'cargo' ? '🚢' : '🪂'}
                   </div>
-                  <span className="mt-0.5 text-[8px] font-extrabold uppercase px-1.5 py-0.5 rounded bg-black/80 text-white border border-black whitespace-nowrap">
+                  <span className="mt-0.5 text-[8px] font-extrabold uppercase px-1.5 py-0.5 rounded bg-black/90 text-white border border-rose-500 whitespace-nowrap shadow-lg">
                     {evt.name}
                   </span>
                 </div>
               );
             })}
 
-            {/* 5. Live Player Markers */}
+            {/* 5. Live Player Markers (Handles all position formats) */}
             {players.map(player => {
-              if (!player.Pos) return null;
-              const pos = toMapPercent(player.Pos.x, player.Pos.z);
+              const coords = getPlayerCoords(player);
+              if (!coords) return null;
+
+              const pos = toMapPercent(coords.x, coords.z);
               const isSelected = selectedPlayer?.SteamID === player.SteamID;
-              const isHealthy = (player.Health || 100) > 60;
-              const isWounded = (player.Health || 100) <= 20;
+              const health = Math.round(Number(player.Health) || 100);
+              const isHealthy = health > 60;
+              const isWounded = health <= 20;
 
               return (
                 <div
-                  key={player.SteamID}
+                  key={player.SteamID || player.DisplayName}
                   style={{ left: pos.left, top: pos.top }}
                   onClick={(e) => {
                     e.stopPropagation();
                     setSelectedPlayer(player);
                     setClickedCoord(null);
                   }}
-                  className="interactive-marker absolute -translate-x-1/2 -translate-y-1/2 flex flex-col items-center cursor-pointer z-20 group transition-all duration-300"
+                  className="interactive-marker absolute -translate-x-1/2 -translate-y-1/2 flex flex-col items-center cursor-pointer z-30 group transition-all duration-300 pointer-events-auto"
                 >
-                  {/* Ping Ring Effect */}
-                  <div className="absolute -inset-1 rounded-full bg-[#cd4628] opacity-40 animate-ping" />
+                  {/* Ping Ring Effect on Selected Player */}
+                  {isSelected && (
+                    <div className="absolute -inset-2 rounded-full bg-[#cd4628] opacity-50 animate-ping" />
+                  )}
 
                   {/* Player Dot Marker */}
-                  <div className={`w-7 h-7 rounded-full flex items-center justify-center text-[10px] font-extrabold text-white border-2 shadow-lg transition-transform group-hover:scale-125 ${
+                  <div className={`w-7 h-7 rounded-full flex items-center justify-center text-[10px] font-extrabold text-white border-2 shadow-xl transition-transform group-hover:scale-125 ${
                     isSelected 
-                      ? 'bg-[#cd4628] border-white scale-125 ring-4 ring-[#cd4628]/40' 
+                      ? 'bg-[#cd4628] border-white scale-125 ring-4 ring-[#cd4628]/50 shadow-[#cd4628]/50' 
                       : isWounded
                       ? 'bg-[#dc2626] border-[#fca5a5]'
                       : isHealthy 
-                      ? 'bg-[#15803d] border-[#86efac]'
+                      ? 'bg-[#16a34a] border-[#86efac]'
                       : 'bg-[#b45309] border-[#fde047]'
                   }`}>
                     {player.DisplayName ? player.DisplayName.charAt(0).toUpperCase() : 'P'}
@@ -441,12 +562,14 @@ export default function RustMap({
 
                   {/* Player Label */}
                   {showPlayerLabels && (
-                    <div className="mt-1 flex flex-col items-center">
-                      <span className="text-[9px] font-bold px-1.5 py-0.2 rounded bg-black/85 text-white border border-[#2f313c] whitespace-nowrap shadow">
+                    <div className="mt-1 flex flex-col items-center pointer-events-none">
+                      <span className="text-[9px] font-bold px-1.5 py-0.5 rounded bg-black/90 text-white border border-[#2f313c] whitespace-nowrap shadow-lg">
                         {player.DisplayName}
                       </span>
-                      <span className="text-[7px] font-mono text-[#4ade80] bg-black/85 px-1 rounded -mt-0.5">
-                        {player.Health || 100} HP
+                      <span className={`text-[8px] font-mono px-1 rounded -mt-0.5 font-bold shadow ${
+                        isHealthy ? 'text-[#4ade80] bg-black/90' : isWounded ? 'text-[#f87171] bg-black/90' : 'text-[#facc15] bg-black/90'
+                      }`}>
+                        {health} HP
                       </span>
                     </div>
                   )}
@@ -478,21 +601,20 @@ export default function RustMap({
               <div>Position: <span className="text-[#38bdf8]">X: {clickedCoord.x}, Z: {clickedCoord.z}</span></div>
             </div>
 
-            <div className="grid grid-cols-2 gap-2">
+            <div className="grid grid-cols-2 gap-2 pt-1">
               <button
-                onClick={() => teleportAdminToCoord(clickedCoord.x, clickedCoord.z)}
-                className="px-3 py-2 rounded-xl bg-[#cd4628] hover:bg-[#ba3b1f] text-white text-xs font-bold transition-colors flex items-center justify-center gap-1.5"
-              >
-                <Crosshair className="w-3.5 h-3.5" />
-                <span>Teleport Here</span>
-              </button>
-
-              <button
-                onClick={() => spawnAirdropAtCoord(clickedCoord.x, clickedCoord.z)}
-                className="px-3 py-2 rounded-xl bg-[#2563eb] hover:bg-[#1d4ed8] text-white text-xs font-bold transition-colors flex items-center justify-center gap-1.5"
+                onClick={() => triggerAction(`supply.call ${clickedCoord.x} ${clickedCoord.z}`, `Airdrop at ${clickedCoord.grid}`)}
+                className="px-3 py-2 rounded-xl bg-[#20222a] hover:bg-[#cd4628] text-white text-xs font-bold transition-colors flex items-center justify-center gap-1.5"
               >
                 <Plane className="w-3.5 h-3.5" />
                 <span>Drop Airdrop</span>
+              </button>
+
+              <button
+                onClick={() => triggerAction(`heli.strafe ${clickedCoord.x} ${clickedCoord.z}`, `Patrol Heli to ${clickedCoord.grid}`)}
+                className="px-3 py-2 rounded-xl bg-[#20222a] hover:bg-[#cd4628] text-white text-xs font-bold transition-colors flex items-center justify-center gap-1.5"
+              >
+                <span>🚁 Send Heli</span>
               </button>
             </div>
           </div>
@@ -500,180 +622,268 @@ export default function RustMap({
 
       </div>
 
-      {/* Right Column: Player Roster & Selected Player Actions */}
-      <div className="w-full lg:w-80 flex flex-col gap-4">
-        
-        {/* Search Roster */}
-        <div className="bg-[#15161c] p-4 rounded-2xl border border-[#24252e] space-y-3">
-          <div className="flex items-center justify-between">
-            <div className="flex items-center gap-2 text-xs font-bold text-white uppercase tracking-wider">
-              <Users className="w-4 h-4 text-[#cd4628]" />
-              <span>Players on Map ({players.length})</span>
+      {/* Right-Side Live Player Radar Drawer */}
+      {showRoster && (
+        <div className="w-72 bg-[#14151a] border-l border-[#23242c] flex flex-col h-full z-20">
+          
+          {/* Header */}
+          <div className="p-4 border-b border-[#23242c] space-y-3">
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-2">
+                <Users className="w-4 h-4 text-[#cd4628]" />
+                <h3 className="text-xs font-bold uppercase tracking-wider text-white">
+                  Radar ({players.length})
+                </h3>
+              </div>
+              <span className="text-[10px] font-mono text-[#4ade80] bg-[#132b1f] border border-[#1f4a33] px-2 py-0.5 rounded-full font-bold">
+                ● Live
+              </span>
+            </div>
+
+            {/* Search filter */}
+            <div className="relative">
+              <Search className="w-3.5 h-3.5 absolute left-2.5 top-2.5 text-[#71737e]" />
+              <input
+                type="text"
+                placeholder="Search players..."
+                value={searchQuery}
+                onChange={(e) => setSearchQuery(e.target.value)}
+                className="w-full bg-[#0d0e12] text-xs text-white pl-8 pr-3 py-1.5 rounded-xl border border-[#252631] focus:outline-none focus:border-[#cd4628]"
+              />
             </div>
           </div>
 
-          <div className="relative">
-            <Search className="w-3.5 h-3.5 absolute left-3 top-2.5 text-[#71737e]" />
-            <input
-              type="text"
-              placeholder="Search & locate player..."
-              value={searchQuery}
-              onChange={(e) => setSearchQuery(e.target.value)}
-              className="w-full bg-[#0e0f13] text-xs text-white pl-8 pr-3 py-2 rounded-xl border border-[#282a35] focus:outline-none focus:border-[#cd4628]"
-            />
-          </div>
-        </div>
+          {/* Player List */}
+          <div className="flex-1 overflow-y-auto p-2 space-y-1.5">
+            {visiblePlayers.length === 0 ? (
+              <div className="p-6 text-center text-xs text-[#5f6273]">
+                {players.length === 0 ? 'No players currently online on server.' : 'No players match your search.'}
+              </div>
+            ) : (
+              visiblePlayers.map(p => {
+                const coords = getPlayerCoords(p);
+                const isSelected = selectedPlayer?.SteamID === p.SteamID;
+                const gridCode = coords ? toGridCode(coords.x, coords.z) : 'N/A';
+                const health = Math.round(Number(p.Health) || 100);
 
-        {/* Player Selection Card / Quick Moderation */}
-        {selectedPlayer ? (
-          <div className="bg-[#15161c] p-5 rounded-2xl border border-[#cd4628]/60 shadow-xl space-y-4 animate-fade-in">
+                return (
+                  <div
+                    key={p.SteamID || p.DisplayName}
+                    onClick={() => centerOnPlayer(p)}
+                    className={`p-2.5 rounded-xl border cursor-pointer transition-all flex items-center justify-between gap-2 ${
+                      isSelected 
+                        ? 'bg-[#2b1f1a] border-[#ea580c] shadow-lg shadow-[#cd4628]/20' 
+                        : 'bg-[#181920] border-[#252631] hover:bg-[#1f2029] hover:border-[#353744]'
+                    }`}
+                  >
+                    <div className="flex items-center gap-2.5 min-w-0">
+                      <div className="w-7 h-7 rounded-lg bg-gradient-to-tr from-[#cd4628] to-[#ea580c] text-white flex items-center justify-center text-xs font-bold shrink-0">
+                        {p.DisplayName ? p.DisplayName.charAt(0).toUpperCase() : 'P'}
+                      </div>
+                      <div className="min-w-0">
+                        <div className="text-xs font-bold text-white truncate">
+                          {p.DisplayName}
+                        </div>
+                        <div className="text-[10px] text-[#71737e] flex items-center gap-2">
+                          <span className="font-mono text-[#38bdf8] font-bold">{gridCode}</span>
+                          <span>•</span>
+                          <span className="text-[#4ade80] font-mono">{health} HP</span>
+                        </div>
+                      </div>
+                    </div>
+
+                    <button
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        centerOnPlayer(p);
+                      }}
+                      title="Focus on Map"
+                      className="p-1 rounded bg-[#252733] hover:bg-[#cd4628] text-[#8e909a] hover:text-white transition-colors"
+                    >
+                      <TargetIcon className="w-3.5 h-3.5" />
+                    </button>
+                  </div>
+                );
+              })
+            )}
+          </div>
+
+          {/* Selected Player Details Card */}
+          {selectedPlayer && (
+            <div className="p-4 border-t border-[#23242c] bg-[#16171e] space-y-3">
+              <div className="flex items-center justify-between">
+                <span className="text-xs font-bold text-white truncate max-w-[150px]">
+                  {selectedPlayer.DisplayName}
+                </span>
+                <span className="text-[10px] font-mono text-[#8e909a]">
+                  {selectedPlayer.Ping || 0} ms
+                </span>
+              </div>
+
+              {/* Moderation & Admin Actions */}
+              <div className="grid grid-cols-2 gap-2">
+                <button
+                  onClick={() => triggerAction(`teleportpos ${selectedPlayer.SteamID} 0 20 0`, `Teleport to center`)}
+                  className="px-2 py-1.5 rounded-lg bg-[#20222a] hover:bg-[#cd4628] text-white text-[11px] font-bold transition-colors"
+                >
+                  Teleport Center
+                </button>
+
+                <button
+                  onClick={() => onGiveItemToPlayer && onGiveItemToPlayer(selectedPlayer)}
+                  className="px-2 py-1.5 rounded-lg bg-[#20222a] hover:bg-[#cd4628] text-white text-[11px] font-bold transition-colors flex items-center justify-center gap-1"
+                >
+                  <Package className="w-3 h-3" />
+                  <span>Give Item</span>
+                </button>
+
+                <button
+                  onClick={() => triggerAction(`kick ${selectedPlayer.SteamID} "Kicked by Admin"`, `Kick ${selectedPlayer.DisplayName}`)}
+                  className="px-2 py-1.5 rounded-lg bg-[#2b1818] hover:bg-[#dc2626] text-[#f87171] hover:text-white text-[11px] font-bold transition-colors"
+                >
+                  Kick Player
+                </button>
+
+                <button
+                  onClick={() => triggerAction(`ban ${selectedPlayer.SteamID} "Banned by Admin"`, `Ban ${selectedPlayer.DisplayName}`)}
+                  className="px-2 py-1.5 rounded-lg bg-[#2b1818] hover:bg-[#dc2626] text-[#f87171] hover:text-white text-[11px] font-bold transition-colors flex items-center justify-center gap-1"
+                >
+                  <ShieldAlert className="w-3 h-3" />
+                  <span>Ban</span>
+                </button>
+              </div>
+            </div>
+          )}
+
+        </div>
+      )}
+
+      {/* Map Image Settings Modal */}
+      {isMapSettingsOpen && (
+        <div className="fixed inset-0 bg-black/80 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+          <div className="bg-[#16171d] rounded-2xl border border-[#2a2c38] p-6 max-w-md w-full shadow-2xl space-y-4">
+            
             <div className="flex items-center justify-between">
               <div className="flex items-center gap-3">
-                <div className="w-10 h-10 rounded-full bg-[#cd4628] flex items-center justify-center text-white font-extrabold text-sm shadow">
-                  {selectedPlayer.DisplayName?.charAt(0).toUpperCase()}
+                <div className="w-10 h-10 rounded-xl bg-gradient-to-tr from-[#cd4628] to-[#ea580c] flex items-center justify-center text-white">
+                  <ImageIcon className="w-5 h-5" />
                 </div>
                 <div>
-                  <h3 className="text-sm font-bold text-white">{selectedPlayer.DisplayName}</h3>
-                  <p className="text-[10px] text-[#71737e] font-mono">{selectedPlayer.SteamID}</p>
+                  <h3 className="text-base font-bold text-white">Map Image & Render</h3>
+                  <p className="text-xs text-[#71737e]">Load your server's actual map terrain image</p>
                 </div>
               </div>
-              <button
-                onClick={() => setSelectedPlayer(null)}
+              <button 
+                onClick={() => setIsMapSettingsOpen(false)}
                 className="text-xs text-[#71737e] hover:text-white"
               >
                 ✕
               </button>
             </div>
 
-            {/* Position Details */}
-            {selectedPlayer.Pos && (
-              <div className="p-3 rounded-xl bg-[#0e0f13] border border-[#252631] font-mono text-xs space-y-1">
-                <div className="flex items-center justify-between text-[#8e909a]">
-                  <span>Grid Square:</span>
-                  <strong className="text-[#fb923c]">{toGridCode(selectedPlayer.Pos.x, selectedPlayer.Pos.z)}</strong>
+            <div className="space-y-4">
+              
+              {/* Option A: Direct Image URL */}
+              <div>
+                <label className="block text-xs font-bold text-[#8e909a] uppercase mb-1">
+                  Custom Map Image URL
+                </label>
+                <input
+                  type="text"
+                  placeholder="https://.../map.jpg or Rust-IO map URL"
+                  value={mapImageUrl}
+                  onChange={(e) => handleSaveMapImage(e.target.value)}
+                  className="w-full bg-[#0e0f13] text-white text-xs font-mono px-3 py-2.5 rounded-xl border border-[#272935] focus:outline-none focus:border-[#cd4628]"
+                />
+              </div>
+
+              {/* Option B: Local File Upload */}
+              <div>
+                <label className="block text-xs font-bold text-[#8e909a] uppercase mb-1">
+                  Or Upload Map Image From PC
+                </label>
+                <input 
+                  type="file" 
+                  ref={fileInputRef}
+                  accept="image/png, image/jpeg, image/webp"
+                  onChange={handleFileUpload}
+                  className="hidden"
+                />
+                <button
+                  type="button"
+                  onClick={() => fileInputRef.current?.click()}
+                  className="w-full py-2.5 px-4 rounded-xl bg-[#20222a] hover:bg-[#282a35] text-xs font-bold text-white border border-[#2b2d38] flex items-center justify-center gap-2 transition-colors"
+                >
+                  <Upload className="w-4 h-4 text-[#cd4628]" />
+                  <span>Choose PNG / JPG File</span>
+                </button>
+              </div>
+
+              {/* Option C: Rust-IO auto URL preset */}
+              {activeServer && !activeServer.isMock && (
+                <div className="p-3 rounded-xl bg-[#101319] border border-[#223042] space-y-2">
+                  <span className="text-xs font-bold text-[#93c5fd]">Quick Server Presets:</span>
+                  <div className="flex flex-wrap gap-2">
+                    <button
+                      type="button"
+                      onClick={() => handleSaveMapImage(`http://${activeServer.ip}:${activeServer.port}/map.jpg`)}
+                      className="px-2.5 py-1 rounded bg-[#1e293b] hover:bg-[#334155] text-[11px] font-mono text-white transition-colors"
+                    >
+                      Rust-IO (Port {activeServer.port})
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => handleSaveMapImage(`http://${activeServer.ip}:28016/map.png`)}
+                      className="px-2.5 py-1 rounded bg-[#1e293b] hover:bg-[#334155] text-[11px] font-mono text-white transition-colors"
+                    >
+                      WebRCON (Port 28016)
+                    </button>
+                  </div>
                 </div>
-                <div className="flex items-center justify-between text-[#8e909a]">
-                  <span>In-Game XYZ:</span>
-                  <span className="text-[#38bdf8]">
-                    {Math.round(selectedPlayer.Pos.x)}, {Math.round(selectedPlayer.Pos.y)}, {Math.round(selectedPlayer.Pos.z)}
-                  </span>
+              )}
+
+              {/* Opacity Slider */}
+              <div>
+                <div className="flex items-center justify-between text-xs text-[#8e909a] mb-1">
+                  <span className="font-bold uppercase">Image Opacity</span>
+                  <span className="font-mono text-white font-bold">{imageOpacity}%</span>
                 </div>
-                <div className="flex items-center justify-between text-[#8e909a]">
-                  <span>Health:</span>
-                  <span className="text-[#4ade80] font-bold">{selectedPlayer.Health || 100} HP</span>
-                </div>
-              </div>
-            )}
-
-            {/* Quick Moderation Actions */}
-            <div className="space-y-2">
-              <div className="grid grid-cols-2 gap-2">
-                <button
-                  onClick={() => onSendCommand(`teleport ${selectedPlayer.SteamID}`)}
-                  className="px-3 py-2 rounded-xl bg-[#1f212a] hover:bg-[#282a35] text-xs font-bold text-white border border-[#2e303d] transition-colors flex items-center justify-center gap-1.5"
-                >
-                  <Navigation className="w-3.5 h-3.5 text-[#60a5fa]" />
-                  <span>Teleport To</span>
-                </button>
-
-                <button
-                  onClick={() => onSendCommand(`teleport ${selectedPlayer.SteamID} @me`)}
-                  className="px-3 py-2 rounded-xl bg-[#1f212a] hover:bg-[#282a35] text-xs font-bold text-white border border-[#2e303d] transition-colors flex items-center justify-center gap-1.5"
-                >
-                  <MapPin className="w-3.5 h-3.5 text-[#fb923c]" />
-                  <span>Bring Player</span>
-                </button>
+                <input
+                  type="range"
+                  min="20"
+                  max="100"
+                  value={imageOpacity}
+                  onChange={(e) => setImageOpacity(Number(e.target.value))}
+                  className="w-full accent-[#cd4628] bg-[#0e0f13] rounded-lg cursor-pointer"
+                />
               </div>
 
-              <div className="grid grid-cols-3 gap-2">
+              {/* Reset to Procedural */}
+              {mapImageUrl && (
                 <button
-                  onClick={() => onGiveItemToPlayer?.(selectedPlayer)}
-                  className="p-2 rounded-xl bg-[#1f212a] hover:bg-[#282a35] text-xs font-bold text-[#fb923c] border border-[#2e303d] transition-colors flex items-center justify-center"
-                  title="Give Item"
+                  type="button"
+                  onClick={() => handleSaveMapImage('')}
+                  className="w-full py-2 rounded-xl bg-[#2a1717] hover:bg-[#3d1e1e] text-xs font-bold text-[#f87171] transition-colors"
                 >
-                  <Package className="w-4 h-4" />
+                  Reset to Procedural Vector Map
                 </button>
+              )}
 
-                <button
-                  onClick={() => onSendCommand(`mute ${selectedPlayer.SteamID}`)}
-                  className="p-2 rounded-xl bg-[#1f212a] hover:bg-[#282a35] text-xs font-bold text-[#facc15] border border-[#2e303d] transition-colors flex items-center justify-center"
-                  title="Mute Player"
-                >
-                  <VolumeX className="w-4 h-4" />
-                </button>
-
-                <button
-                  onClick={() => onSendCommand(`entity.kill ${selectedPlayer.SteamID}`)}
-                  className="p-2 rounded-xl bg-[#1f212a] hover:bg-[#3d1a1a] text-xs font-bold text-[#f87171] border border-[#2e303d] transition-colors flex items-center justify-center"
-                  title="Kill Player"
-                >
-                  <Skull className="w-4 h-4" />
-                </button>
-              </div>
-
-              <div className="grid grid-cols-2 gap-2 pt-1">
-                <button
-                  onClick={() => onSendCommand(`kick ${selectedPlayer.SteamID} "Kicked by admin"`)}
-                  className="px-3 py-2 rounded-xl bg-[#2a1a14] hover:bg-[#3d2417] text-[#fb923c] border border-[#4d2f1d] text-xs font-bold transition-colors"
-                >
-                  Kick
-                </button>
-                <button
-                  onClick={() => onSendCommand(`ban ${selectedPlayer.SteamID} "Banned by admin"`)}
-                  className="px-3 py-2 rounded-xl bg-[#2d1414] hover:bg-[#421a1a] text-[#f87171] border border-[#521d1d] text-xs font-bold transition-colors"
-                >
-                  Ban
-                </button>
-              </div>
             </div>
 
-          </div>
-        ) : (
-          <div className="bg-[#15161c] p-4 rounded-2xl border border-[#24252e] text-center text-xs text-[#71737e] py-6">
-            Click on any player marker on the map to view coordinates & quick actions.
-          </div>
-        )}
-
-        {/* Scrollable Player List */}
-        <div className="flex-1 bg-[#15161c] rounded-2xl border border-[#24252e] p-3 overflow-y-auto space-y-1.5 max-h-[350px]">
-          {filteredPlayers.length === 0 ? (
-            <div className="py-6 text-center text-xs text-[#676a79]">
-              No players found
-            </div>
-          ) : (
-            filteredPlayers.map(player => (
+            <div className="pt-2 flex justify-end">
               <button
-                key={player.SteamID}
-                onClick={() => focusPlayer(player)}
-                className={`w-full p-2.5 rounded-xl text-left transition-colors flex items-center justify-between group ${
-                  selectedPlayer?.SteamID === player.SteamID
-                    ? 'bg-[#291b17] border border-[#cd4628]'
-                    : 'bg-[#191b22] hover:bg-[#20222a] border border-transparent'
-                }`}
+                type="button"
+                onClick={() => setIsMapSettingsOpen(false)}
+                className="px-5 py-2 rounded-xl bg-[#cd4628] text-white text-xs font-bold hover:bg-[#ba3e22] transition-colors"
               >
-                <div className="flex items-center gap-2.5">
-                  <div className="w-6 h-6 rounded-full bg-[#2a2c36] flex items-center justify-center text-[10px] font-bold text-white">
-                    {player.DisplayName?.charAt(0).toUpperCase()}
-                  </div>
-                  <div>
-                    <h4 className="text-xs font-bold text-white group-hover:text-[#fdba74] transition-colors">
-                      {player.DisplayName}
-                    </h4>
-                    <span className="text-[10px] text-[#71737e] font-mono">
-                      {player.Pos ? toGridCode(player.Pos.x, player.Pos.z) : 'Grid ?'}
-                    </span>
-                  </div>
-                </div>
-
-                <span className="text-[10px] font-mono px-1.5 py-0.5 rounded bg-[#13271b] text-[#4ade80]">
-                  {player.Health || 100} HP
-                </span>
+                Apply & Close
               </button>
-            ))
-          )}
-        </div>
+            </div>
 
-      </div>
+          </div>
+        </div>
+      )}
 
     </div>
   );
