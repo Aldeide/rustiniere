@@ -11,6 +11,7 @@ import ItemGiver from './components/ItemGiver';
 import Bans from './components/Bans';
 import ServerModal from './components/ServerModal';
 import { api } from './services/api';
+import { storage } from './services/storage';
 
 export default function App() {
   const [activeTab, setActiveTab] = useState('dashboard');
@@ -43,6 +44,8 @@ export default function App() {
 
   const loadInitialData = async () => {
     try {
+      await storage.initDesktopSync();
+
       const serverList = await api.getServers();
       setServers(serverList || []);
 

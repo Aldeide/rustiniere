@@ -1,10 +1,46 @@
 const { app, BrowserWindow, Tray, Menu, ipcMain, Notification } = require('electron');
 const path = require('path');
 const url = require('url');
+const fs = require('fs');
+
+app.setName('Rustiniere');
 
 let mainWindow = null;
 let tray = null;
 let isQuitting = false;
+
+// Native persistent JSON configuration
+function getConfigPath() {
+  const userDataPath = app.getPath('userData');
+  if (!fs.existsSync(userDataPath)) {
+    fs.mkdirSync(userDataPath, { recursive: true });
+  }
+  return path.join(userDataPath, 'rustiniere_config.json');
+}
+
+function loadNativeConfig() {
+  try {
+    const configPath = getConfigPath();
+    if (fs.existsSync(configPath)) {
+      const data = fs.readFileSync(configPath, 'utf8');
+      return JSON.parse(data);
+    }
+  } catch (e) {
+    console.error('Error loading native config:', e);
+  }
+  return null;
+}
+
+function saveNativeConfig(config) {
+  try {
+    const configPath = getConfigPath();
+    fs.writeFileSync(configPath, JSON.stringify(config, null, 2), 'utf8');
+    return true;
+  } catch (e) {
+    console.error('Error saving native config:', e);
+    return false;
+  }
+}
 
 function createWindow() {
   mainWindow = new BrowserWindow({
@@ -107,6 +143,14 @@ ipcMain.handle('app:maximize', () => {
 
 ipcMain.handle('app:close', () => {
   if (mainWindow) mainWindow.close();
+});
+
+ipcMain.handle('storage:get-all', () => {
+  return loadNativeConfig();
+});
+
+ipcMain.handle('storage:save-all', (event, config) => {
+  return saveNativeConfig(config);
 });
 
 // App lifecycle

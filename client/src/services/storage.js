@@ -7,13 +7,22 @@ const STORAGE_KEYS = {
 
 const DEFAULT_SERVERS = [
   {
+    id: 'rustiniere-prod',
+    name: 'La Rustinière',
+    ip: '5.39.17.5',
+    port: 26999,
+    password: '',
+    isMock: false,
+    autoConnect: true
+  },
+  {
     id: 'demo-server',
     name: 'Rust Demo / Simulated Island',
     ip: '127.0.0.1',
     port: 28016,
     password: 'demo_password',
     isMock: true,
-    autoConnect: true
+    autoConnect: false
   }
 ];
 
@@ -131,7 +140,45 @@ const DEFAULT_TASKS = [
   }
 ];
 
+function syncNativeStorage(updatedData = {}) {
+  if (typeof window !== 'undefined' && window.electronAPI?.saveConfig) {
+    const fullConfig = {
+      servers: storage.getServers(),
+      triggers: storage.getTriggers(),
+      tasks: storage.getTasks(),
+      activeServerId: storage.getActiveServerId(),
+      ...updatedData
+    };
+    window.electronAPI.saveConfig(fullConfig).catch(() => {});
+  }
+}
+
 export const storage = {
+  // Initialize from native desktop file if available
+  initDesktopSync: async () => {
+    if (typeof window !== 'undefined' && window.electronAPI?.getConfig) {
+      try {
+        const nativeCfg = await window.electronAPI.getConfig();
+        if (nativeCfg) {
+          if (nativeCfg.servers && Array.isArray(nativeCfg.servers)) {
+            localStorage.setItem(STORAGE_KEYS.SERVERS, JSON.stringify(nativeCfg.servers));
+          }
+          if (nativeCfg.triggers && Array.isArray(nativeCfg.triggers)) {
+            localStorage.setItem(STORAGE_KEYS.TRIGGERS, JSON.stringify(nativeCfg.triggers));
+          }
+          if (nativeCfg.tasks && Array.isArray(nativeCfg.tasks)) {
+            localStorage.setItem(STORAGE_KEYS.TASKS, JSON.stringify(nativeCfg.tasks));
+          }
+          if (nativeCfg.activeServerId) {
+            localStorage.setItem(STORAGE_KEYS.ACTIVE_SERVER_ID, nativeCfg.activeServerId);
+          }
+        }
+      } catch (e) {
+        console.error('Failed to sync native desktop storage:', e);
+      }
+    }
+  },
+
   getServers: () => {
     try {
       const raw = localStorage.getItem(STORAGE_KEYS.SERVERS);
@@ -144,6 +191,7 @@ export const storage = {
   saveServers: (servers) => {
     try {
       localStorage.setItem(STORAGE_KEYS.SERVERS, JSON.stringify(servers));
+      syncNativeStorage({ servers });
     } catch (e) {}
   },
 
@@ -159,6 +207,7 @@ export const storage = {
   saveTriggers: (triggers) => {
     try {
       localStorage.setItem(STORAGE_KEYS.TRIGGERS, JSON.stringify(triggers));
+      syncNativeStorage({ triggers });
     } catch (e) {}
   },
 
@@ -174,14 +223,18 @@ export const storage = {
   saveTasks: (tasks) => {
     try {
       localStorage.setItem(STORAGE_KEYS.TASKS, JSON.stringify(tasks));
+      syncNativeStorage({ tasks });
     } catch (e) {}
   },
 
   getActiveServerId: () => {
-    return localStorage.getItem(STORAGE_KEYS.ACTIVE_SERVER_ID) || 'demo-server';
+    return localStorage.getItem(STORAGE_KEYS.ACTIVE_SERVER_ID) || 'rustiniere-prod';
   },
 
   saveActiveServerId: (id) => {
-    localStorage.setItem(STORAGE_KEYS.ACTIVE_SERVER_ID, id);
+    try {
+      localStorage.setItem(STORAGE_KEYS.ACTIVE_SERVER_ID, id);
+      syncNativeStorage({ activeServerId: id });
+    } catch (e) {}
   }
 };
