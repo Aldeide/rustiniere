@@ -7,7 +7,7 @@ const STORAGE_KEYS = {
 
 const DEFAULT_SERVERS = [
   {
-    id: 'rustiniere-prod',
+    id: 'rustiniere-main',
     name: 'La Rustinière',
     ip: '5.39.17.5',
     port: 26999,
@@ -160,7 +160,7 @@ export const storage = {
       try {
         const nativeCfg = await window.electronAPI.getConfig();
         if (nativeCfg) {
-          if (nativeCfg.servers && Array.isArray(nativeCfg.servers)) {
+          if (nativeCfg.servers && Array.isArray(nativeCfg.servers) && nativeCfg.servers.length > 0) {
             localStorage.setItem(STORAGE_KEYS.SERVERS, JSON.stringify(nativeCfg.servers));
           }
           if (nativeCfg.triggers && Array.isArray(nativeCfg.triggers)) {
@@ -172,17 +172,32 @@ export const storage = {
           if (nativeCfg.activeServerId) {
             localStorage.setItem(STORAGE_KEYS.ACTIVE_SERVER_ID, nativeCfg.activeServerId);
           }
+          return;
         }
       } catch (e) {
         console.error('Failed to sync native desktop storage:', e);
       }
     }
+
+    // If no native config exists yet, persist defaults
+    syncNativeStorage();
   },
 
   getServers: () => {
     try {
       const raw = localStorage.getItem(STORAGE_KEYS.SERVERS);
-      return raw ? JSON.parse(raw) : DEFAULT_SERVERS;
+      const list = raw ? JSON.parse(raw) : null;
+      if (list && Array.isArray(list) && list.length > 0) {
+        // Ensure production server is merged if user had stale cache
+        const hasProd = list.some(s => !s.isMock);
+        if (!hasProd) {
+          const merged = [DEFAULT_SERVERS[0], ...list];
+          storage.saveServers(merged);
+          return merged;
+        }
+        return list;
+      }
+      return DEFAULT_SERVERS;
     } catch (e) {
       return DEFAULT_SERVERS;
     }
@@ -228,7 +243,10 @@ export const storage = {
   },
 
   getActiveServerId: () => {
-    return localStorage.getItem(STORAGE_KEYS.ACTIVE_SERVER_ID) || 'rustiniere-prod';
+    const id = localStorage.getItem(STORAGE_KEYS.ACTIVE_SERVER_ID);
+    if (id) return id;
+    const servers = storage.getServers();
+    return servers[0]?.id || 'rustiniere-main';
   },
 
   saveActiveServerId: (id) => {

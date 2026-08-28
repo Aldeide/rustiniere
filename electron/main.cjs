@@ -9,32 +9,57 @@ let mainWindow = null;
 let tray = null;
 let isQuitting = false;
 
-// Native persistent JSON configuration
-function getConfigPath() {
-  const userDataPath = app.getPath('userData');
-  if (!fs.existsSync(userDataPath)) {
-    fs.mkdirSync(userDataPath, { recursive: true });
+// Native persistent JSON configuration (Dual storage: App directory + UserData)
+function getAppDirConfigPath() {
+  return path.join(__dirname, '..', 'rustiniere_config.json');
+}
+
+function getUserDataConfigPath() {
+  try {
+    const userDataPath = app.getPath('userData');
+    if (!fs.existsSync(userDataPath)) {
+      fs.mkdirSync(userDataPath, { recursive: true });
+    }
+    return path.join(userDataPath, 'rustiniere_config.json');
+  } catch (e) {
+    return getAppDirConfigPath();
   }
-  return path.join(userDataPath, 'rustiniere_config.json');
 }
 
 function loadNativeConfig() {
-  try {
-    const configPath = getConfigPath();
-    if (fs.existsSync(configPath)) {
-      const data = fs.readFileSync(configPath, 'utf8');
-      return JSON.parse(data);
-    }
-  } catch (e) {
-    console.error('Error loading native config:', e);
+  // Check app directory first
+  const appPath = getAppDirConfigPath();
+  if (fs.existsSync(appPath)) {
+    try {
+      const data = fs.readFileSync(appPath, 'utf8');
+      const parsed = JSON.parse(data);
+      if (parsed && parsed.servers) return parsed;
+    } catch (e) {}
   }
+
+  // Fallback to userData
+  const userPath = getUserDataConfigPath();
+  if (fs.existsSync(userPath)) {
+    try {
+      const data = fs.readFileSync(userPath, 'utf8');
+      return JSON.parse(data);
+    } catch (e) {}
+  }
+
   return null;
 }
 
 function saveNativeConfig(config) {
   try {
-    const configPath = getConfigPath();
-    fs.writeFileSync(configPath, JSON.stringify(config, null, 2), 'utf8');
+    const str = JSON.stringify(config, null, 2);
+    // Write to app directory
+    try {
+      fs.writeFileSync(getAppDirConfigPath(), str, 'utf8');
+    } catch (e) {}
+    // Write to userData
+    try {
+      fs.writeFileSync(getUserDataConfigPath(), str, 'utf8');
+    } catch (e) {}
     return true;
   } catch (e) {
     console.error('Error saving native config:', e);
