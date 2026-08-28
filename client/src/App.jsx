@@ -32,6 +32,15 @@ export default function App() {
   const [triggersCount, setTriggersCount] = useState(7);
   const [scheduledCount, setScheduledCount] = useState(2);
 
+  const refreshCounts = async () => {
+    try {
+      const trigs = await api.getTriggers();
+      if (trigs) setTriggersCount(trigs.filter(t => t.enabled).length);
+      const tasks = await api.getTasks();
+      if (tasks) setScheduledCount(tasks.filter(t => t.enabled).length);
+    } catch (e) {}
+  };
+
   const loadInitialData = async () => {
     try {
       const serverList = await api.getServers();
@@ -53,15 +62,15 @@ export default function App() {
         });
       }
 
-      const trigs = await api.getTriggers();
-      if (trigs) setTriggersCount(trigs.filter(t => t.enabled).length);
-
-      const tasks = await api.getTasks();
-      if (tasks) setScheduledCount(tasks.filter(t => t.enabled).length);
+      await refreshCounts();
     } catch (err) {
       console.error('Failed to load initial data:', err);
     }
   };
+
+  useEffect(() => {
+    refreshCounts();
+  }, [activeTab]);
 
   useEffect(() => {
     loadInitialData();
@@ -239,12 +248,14 @@ export default function App() {
         {activeTab === 'triggers' && (
           <Triggers
             onSendCommand={handleSendCommand}
+            onTriggersChange={refreshCounts}
           />
         )}
 
         {activeTab === 'scheduler' && (
           <Scheduler
             onSendCommand={handleSendCommand}
+            onTasksChange={refreshCounts}
           />
         )}
 

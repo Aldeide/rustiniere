@@ -329,7 +329,7 @@ export default function Dashboard({
                   </div>
                 </div>
                 <span className="text-xs font-extrabold text-[#fb923c] font-mono px-2 py-1 rounded bg-[#2b1f1a]">
-                  {triggersCount || 7} Active
+                  {triggersCount !== undefined ? triggersCount : 0} Active
                 </span>
               </div>
 
@@ -344,7 +344,7 @@ export default function Dashboard({
                   </div>
                 </div>
                 <span className="text-xs font-extrabold text-[#60a5fa] font-mono px-2 py-1 rounded bg-[#1a2435]">
-                  {scheduledCount || 2} Active
+                  {scheduledCount !== undefined ? scheduledCount : 0} Active
                 </span>
               </div>
             </div>

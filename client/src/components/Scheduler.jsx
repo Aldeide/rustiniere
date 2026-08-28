@@ -12,7 +12,7 @@ import {
 } from 'lucide-react';
 import { api } from '../services/api';
 
-export default function Scheduler({ onSendCommand }) {
+export default function Scheduler({ onSendCommand, onTasksChange }) {
   const [tasks, setTasks] = useState([]);
   const [history, setHistory] = useState([]);
   const [isModalOpen, setIsModalOpen] = useState(false);
@@ -31,6 +31,7 @@ export default function Scheduler({ onSendCommand }) {
       setTasks(taskList || []);
       const hist = await api.getSchedulerHistory();
       setHistory(hist || []);
+      onTasksChange?.();
     } catch (e) {
       console.error('Failed to load scheduler tasks:', e);
     }

@@ -18,7 +18,7 @@ import {
 } from 'lucide-react';
 import { api } from '../services/api';
 
-export default function Triggers({ onSendCommand }) {
+export default function Triggers({ onSendCommand, onTriggersChange }) {
   const [triggers, setTriggers] = useState([]);
   const [history, setHistory] = useState([]);
   const [isModalOpen, setIsModalOpen] = useState(false);
@@ -41,6 +41,7 @@ export default function Triggers({ onSendCommand }) {
       setTriggers(trigs || []);
       const hist = await api.getTriggerHistory();
       setHistory(hist || []);
+      onTriggersChange?.();
     } catch (e) {
       console.error('Failed to load triggers:', e);
     }
