@@ -140,8 +140,8 @@ export class BrowserWebRcon {
     this.stopHeartbeat();
     this.heartbeatTimer = setInterval(() => {
       if (this.connected && this.ws) {
-        this.sendCommand('serverinfo', 4000).catch(() => {});
-        this.sendCommand('playerlist', 4000).catch(() => {});
+        this.sendInternalCommand('serverinfo', 4000).catch(() => {});
+        this.sendInternalCommand('playerlist', 4000).catch(() => {});
       }
     }, 5000);
   }
@@ -155,8 +155,44 @@ export class BrowserWebRcon {
 
   handlePacket(packet) {
     const id = packet.Identifier;
-    const msg = packet.Message || '';
+    const msg = (packet.Message || '').trim();
     const type = packet.Type || 'Generic';
+
+    let isInternal = false;
+
+    // Check if this fulfills a pending promise callback
+    if (id && id > 0 && this.pendingCallbacks.has(id)) {
+      const pending = this.pendingCallbacks.get(id);
+      if (pending.timer) clearTimeout(pending.timer);
+      isInternal = pending.isInternal === true;
+      this.pendingCallbacks.delete(id);
+      pending.resolve({
+        id: `log-${Date.now()}-${Math.random().toString(36).substr(2, 4)}`,
+        Identifier: id,
+        Message: msg,
+        Type: type,
+        Stacktrace: packet.Stacktrace || '',
+        Time: new Date().toISOString()
+      });
+    }
+
+    // Try parsing serverinfo or playerlist if returned in payload
+    if (msg.startsWith('{') && msg.includes('"Hostname"')) {
+      try {
+        const info = JSON.parse(msg);
+        this.emit('info', info);
+      } catch (e) {}
+    } else if (msg.startsWith('[') && (msg.includes('"SteamID"') || msg === '[]')) {
+      try {
+        const pList = JSON.parse(msg);
+        this.emit('players', pList);
+      } catch (e) {}
+    }
+
+    // If this packet was from an automatic internal background heartbeat, do not pollute user console
+    if (isInternal) {
+      return;
+    }
 
     const logEntry = {
       id: `log-${Date.now()}-${Math.random().toString(36).substr(2, 4)}`,
@@ -167,15 +203,7 @@ export class BrowserWebRcon {
       Time: new Date().toISOString()
     };
 
-    // Check if this fulfills a pending promise callback
-    if (id && id > 0 && this.pendingCallbacks.has(id)) {
-      const { resolve, timer } = this.pendingCallbacks.get(id);
-      if (timer) clearTimeout(timer);
-      this.pendingCallbacks.delete(id);
-      resolve(logEntry);
-    }
-
-    // Emit live console log
+    // Emit live console log for real server events & manual commands
     this.emit('log', logEntry);
 
     // If chat message
@@ -214,6 +242,38 @@ export class BrowserWebRcon {
     }
   }
 
+  sendInternalCommand(command, timeoutMs = 6000) {
+    return new Promise((resolve, reject) => {
+      if (!this.connected || !this.ws) {
+        return reject(new Error('WebRCON is not connected'));
+      }
+
+      const id = ++this.messageId;
+      const payload = JSON.stringify({
+        Identifier: id,
+        Message: command,
+        Stacktrace: ''
+      });
+
+      const timer = setTimeout(() => {
+        if (this.pendingCallbacks.has(id)) {
+          this.pendingCallbacks.delete(id);
+          reject(new Error(`Internal command timed out: ${command}`));
+        }
+      }, timeoutMs);
+
+      this.pendingCallbacks.set(id, { resolve, reject, timer, command, isInternal: true });
+
+      try {
+        this.ws.send(payload);
+      } catch (err) {
+        clearTimeout(timer);
+        this.pendingCallbacks.delete(id);
+        reject(err);
+      }
+    });
+  }
+
   sendCommand(command, timeoutMs = 8000) {
     return new Promise((resolve, reject) => {
       if (!this.connected || !this.ws) {
@@ -234,7 +294,7 @@ export class BrowserWebRcon {
         }
       }, timeoutMs);
 
-      this.pendingCallbacks.set(id, { resolve, reject, timer, command });
+      this.pendingCallbacks.set(id, { resolve, reject, timer, command, isInternal: false });
 
       try {
         this.ws.send(payload);

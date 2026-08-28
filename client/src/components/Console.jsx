@@ -7,10 +7,12 @@ import {
   Filter, 
   Search, 
   Terminal as TerminalIcon,
-  HelpCircle
+  HelpCircle,
+  Copy,
+  Check
 } from 'lucide-react';
 
-export default function Console({ logs, onSendCommand, isConnected }) {
+export default function Console({ logs = [], onSendCommand, isConnected }) {
   const [inputCommand, setInputCommand] = useState('');
   const [history, setHistory] = useState([]);
   const [historyIndex, setHistoryIndex] = useState(-1);
@@ -18,6 +20,8 @@ export default function Console({ logs, onSendCommand, isConnected }) {
   const [filterType, setFilterType] = useState('all');
   const [searchQuery, setSearchQuery] = useState('');
   const [isExecuting, setIsExecuting] = useState(false);
+  const [clearedBeforeTime, setClearedBeforeTime] = useState(0);
+  const [copiedId, setCopiedId] = useState(null);
 
   const consoleEndRef = useRef(null);
 
@@ -67,17 +71,23 @@ export default function Console({ logs, onSendCommand, isConnected }) {
     }
   };
 
-  const clearLogs = () => {
-    // Local clear indicator
+  const handleClear = () => {
+    setClearedBeforeTime(Date.now());
+  };
+
+  const handleCopyLine = (text, id) => {
+    navigator.clipboard.writeText(text);
+    setCopiedId(id);
+    setTimeout(() => setCopiedId(null), 2000);
   };
 
   const exportLogs = () => {
-    const text = logs.map(l => `[${new Date(l.Time || Date.now()).toLocaleTimeString()}] [${l.Type || 'GENERIC'}] ${l.Message}`).join('\n');
+    const text = filteredLogs.map(l => `[${new Date(l.Time || Date.now()).toLocaleTimeString()}] [${l.Type || 'GENERIC'}] ${l.Message}`).join('\n');
     const blob = new Blob([text], { type: 'text/plain;charset=utf-8' });
     const url = URL.createObjectURL(blob);
     const link = document.createElement('a');
     link.href = url;
-    link.download = `rust-console-logs-${Date.now()}.txt`;
+    link.download = `rustiniere-console-${Date.now()}.txt`;
     link.click();
     URL.revokeObjectURL(url);
   };
@@ -95,15 +105,23 @@ export default function Console({ logs, onSendCommand, isConnected }) {
     { label: 'gc.collect', cmd: 'gc.collect' }
   ];
 
-  const filteredLogs = logs.filter(log => {
+  const visibleLogs = logs.filter(l => {
+    if (clearedBeforeTime > 0) {
+      const logTime = l.Time ? new Date(l.Time).getTime() : 0;
+      if (logTime < clearedBeforeTime) return false;
+    }
+    return true;
+  });
+
+  const filteredLogs = visibleLogs.filter(log => {
     const msg = (log.Message || '').toLowerCase();
     const type = (log.Type || 'generic').toLowerCase();
 
     if (filterType !== 'all') {
-      if (filterType === 'chat' && type !== 'chat') return false;
-      if (filterType === 'warning' && type !== 'warning') return false;
-      if (filterType === 'error' && type !== 'error') return false;
-      if (filterType === 'combat' && !msg.includes('combatlog') && !msg.includes('killed')) return false;
+      if (filterType === 'chat' && type !== 'chat' && !msg.startsWith('[chat]')) return false;
+      if (filterType === 'warning' && type !== 'warning' && !msg.includes('warning')) return false;
+      if (filterType === 'error' && type !== 'error' && !msg.includes('error')) return false;
+      if (filterType === 'combat' && !msg.includes('combatlog') && !msg.includes('killed') && !msg.includes('wounded')) return false;
     }
 
     if (searchQuery) {
@@ -113,23 +131,75 @@ export default function Console({ logs, onSendCommand, isConnected }) {
     return true;
   });
 
-  const getLogColor = (log) => {
+  const formatLogContent = (msg) => {
+    if (!msg) return '';
+    const trimmed = msg.trim();
+
+    // Pretty-format JSON responses if user ran serverinfo or playerlist manually
+    if ((trimmed.startsWith('{') && trimmed.endsWith('}')) || (trimmed.startsWith('[') && trimmed.endsWith(']'))) {
+      try {
+        const parsed = JSON.parse(trimmed);
+        return (
+          <pre className="mt-1 p-2.5 rounded-lg bg-[#08090b] text-[#93c5fd] font-mono text-[11px] overflow-x-auto border border-[#1e2330] leading-relaxed">
+            {JSON.stringify(parsed, null, 2)}
+          </pre>
+        );
+      } catch (e) {}
+    }
+
+    return <span className="font-mono text-[12px]">{msg}</span>;
+  };
+
+  const getLogStyle = (log) => {
     const type = (log.Type || '').toLowerCase();
     const msg = (log.Message || '').toLowerCase();
 
-    if (type === 'error' || msg.includes('error') || msg.includes('exception')) {
-      return 'text-[#f87171] bg-[#2d1717]/40 border-l-2 border-[#f87171]';
+    if (type === 'error' || msg.includes('error') || msg.includes('exception') || msg.includes('failed')) {
+      return {
+        badge: 'ERROR',
+        badgeColor: 'bg-red-500/20 text-red-400 border-red-500/30',
+        textColor: 'text-red-300',
+        bg: 'bg-red-950/20 border-l-2 border-red-500'
+      };
     }
     if (type === 'warning' || msg.includes('warning') || msg.includes('kicked') || msg.includes('banned')) {
-      return 'text-[#fbbf24] bg-[#2d2517]/40 border-l-2 border-[#fbbf24]';
+      return {
+        badge: 'WARN',
+        badgeColor: 'bg-amber-500/20 text-amber-400 border-amber-500/30',
+        textColor: 'text-amber-300',
+        bg: 'bg-amber-950/20 border-l-2 border-amber-500'
+      };
     }
-    if (type === 'chat' || msg.startsWith('[chat]')) {
-      return 'text-[#38bdf8] bg-[#14232e]/40 border-l-2 border-[#38bdf8]';
+    if (type === 'chat' || msg.startsWith('[chat]') || msg.includes('say "')) {
+      return {
+        badge: 'CHAT',
+        badgeColor: 'bg-sky-500/20 text-sky-400 border-sky-500/30',
+        textColor: 'text-sky-200',
+        bg: 'bg-sky-950/20 border-l-2 border-sky-500'
+      };
     }
-    if (msg.includes('combatlog') || msg.includes('killed')) {
-      return 'text-[#e879f9] bg-[#28162e]/40 border-l-2 border-[#e879f9]';
+    if (msg.includes('combatlog') || msg.includes('killed') || msg.includes('wounded') || msg.includes('died')) {
+      return {
+        badge: 'COMBAT',
+        badgeColor: 'bg-fuchsia-500/20 text-fuchsia-400 border-fuchsia-500/30',
+        textColor: 'text-fuchsia-300',
+        bg: 'bg-fuchsia-950/20 border-l-2 border-fuchsia-500'
+      };
     }
-    return 'text-[#cbd0dd] hover:bg-[#181920]';
+    if (msg.includes('joined [') || msg.includes('disconnecting:') || msg.includes('left the game')) {
+      return {
+        badge: 'PLAYER',
+        badgeColor: 'bg-emerald-500/20 text-emerald-400 border-emerald-500/30',
+        textColor: 'text-emerald-300',
+        bg: 'bg-emerald-950/20 border-l-2 border-emerald-500'
+      };
+    }
+    return {
+      badge: log.Type && log.Type !== 'Generic' ? log.Type.toUpperCase() : null,
+      badgeColor: 'bg-[#21232d] text-[#8e909a] border-[#2e303d]',
+      textColor: 'text-[#d1d5db]',
+      bg: 'hover:bg-[#15171d]'
+    };
   };
 
   return (
@@ -142,23 +212,29 @@ export default function Console({ logs, onSendCommand, isConnected }) {
           <TerminalIcon className="w-4 h-4 text-[#cd4628]" />
           <span className="text-xs font-bold uppercase tracking-wider text-white">Live WebRCON Console</span>
           <span className="text-[11px] font-mono text-[#71737e] bg-[#202129] px-2 py-0.5 rounded">
-            {logs.length} Lines
+            {filteredLogs.length} Lines
           </span>
         </div>
 
         {/* Filter Pills */}
         <div className="flex items-center gap-1.5 overflow-x-auto">
-          {['all', 'chat', 'warning', 'error', 'combat'].map(f => (
+          {[
+            { id: 'all', label: 'All' },
+            { id: 'chat', label: 'Chat' },
+            { id: 'warning', label: 'Warnings' },
+            { id: 'error', label: 'Errors' },
+            { id: 'combat', label: 'Combat' }
+          ].map(f => (
             <button
-              key={f}
-              onClick={() => setFilterType(f)}
-              className={`text-[11px] font-semibold uppercase px-2.5 py-1 rounded-md transition-colors ${
-                filterType === f
-                  ? 'bg-[#cd4628] text-white'
+              key={f.id}
+              onClick={() => setFilterType(f.id)}
+              className={`text-[11px] font-bold uppercase px-2.5 py-1 rounded-md transition-colors ${
+                filterType === f.id
+                  ? 'bg-[#cd4628] text-white shadow'
                   : 'bg-[#202128] text-[#8e909a] hover:text-white hover:bg-[#282a33]'
               }`}
             >
-              {f}
+              {f.label}
             </button>
           ))}
         </div>
@@ -169,12 +245,20 @@ export default function Console({ logs, onSendCommand, isConnected }) {
             <Search className="w-3.5 h-3.5 absolute left-2.5 top-2.5 text-[#71737e]" />
             <input
               type="text"
-              placeholder="Search logs..."
+              placeholder="Filter logs..."
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
               className="bg-[#101115] text-xs text-white pl-8 pr-3 py-1.5 rounded-lg border border-[#272832] focus:outline-none focus:border-[#cd4628] w-36 sm:w-48 font-mono"
             />
           </div>
+
+          <button
+            onClick={handleClear}
+            title="Clear Console Display"
+            className="p-1.5 rounded-lg bg-[#202128] border border-[#2b2d38] text-[#8e909a] hover:text-[#f87171] hover:border-[#f87171]/40 transition-colors"
+          >
+            <Trash2 className="w-4 h-4" />
+          </button>
 
           <button
             onClick={() => setAutoScroll(!autoScroll)}
@@ -190,7 +274,7 @@ export default function Console({ logs, onSendCommand, isConnected }) {
 
           <button
             onClick={exportLogs}
-            title="Download Logs"
+            title="Export Logs as Text File"
             className="p-1.5 rounded-lg bg-[#202128] border border-[#2b2d38] text-[#8e909a] hover:text-white transition-colors"
           >
             <Download className="w-4 h-4" />
@@ -200,42 +284,65 @@ export default function Console({ logs, onSendCommand, isConnected }) {
       </div>
 
       {/* Terminal Logs Output */}
-      <div className="flex-1 overflow-y-auto p-4 font-mono text-xs space-y-1 bg-[#0e0f13] select-text">
+      <div className="flex-1 overflow-y-auto p-3 font-mono text-xs space-y-1.5 bg-[#0b0c0f] select-text">
         {filteredLogs.length === 0 ? (
-          <div className="h-full flex items-center justify-center text-[#555866]">
-            <span>No console logs matched. Listening for server messages...</span>
+          <div className="h-full flex flex-col items-center justify-center text-[#555866] space-y-2">
+            <TerminalIcon className="w-8 h-8 opacity-30 text-[#8e909a]" />
+            <span className="text-xs font-medium">No console logs to display. Listening for server events...</span>
           </div>
         ) : (
-          filteredLogs.map((log, idx) => (
-            <div 
-              key={log.id || idx} 
-              className={`px-2.5 py-1 rounded transition-colors break-all leading-relaxed ${getLogColor(log)}`}
-            >
-              <span className="text-[#595c6c] select-none mr-2 font-mono text-[10px]">
-                {log.Time ? new Date(log.Time).toLocaleTimeString() : '00:00:00'}
-              </span>
-              {log.Type && log.Type !== 'Generic' && (
-                <span className="text-[10px] font-bold uppercase mr-2 px-1 py-0.2 rounded bg-black/30">
-                  [{log.Type}]
-                </span>
-              )}
-              <span>{log.Message}</span>
-            </div>
-          ))
+          filteredLogs.map((log, idx) => {
+            const style = getLogStyle(log);
+            const lineId = log.id || idx;
+            return (
+              <div 
+                key={lineId} 
+                className={`group px-3 py-1.5 rounded-lg transition-all flex items-start justify-between gap-3 ${style.bg}`}
+              >
+                <div className="flex-1 min-w-0">
+                  <div className="flex items-center gap-2 mb-0.5">
+                    <span className="text-[#525666] select-none font-mono text-[10px] tracking-tight">
+                      {log.Time ? new Date(log.Time).toLocaleTimeString() : '00:00:00'}
+                    </span>
+                    {style.badge && (
+                      <span className={`text-[9px] font-extrabold uppercase px-1.5 py-0.2 rounded border tracking-wider ${style.badgeColor}`}>
+                        {style.badge}
+                      </span>
+                    )}
+                  </div>
+                  <div className={`break-words leading-relaxed ${style.textColor}`}>
+                    {formatLogContent(log.Message)}
+                  </div>
+                </div>
+
+                <button
+                  onClick={() => handleCopyLine(log.Message, lineId)}
+                  title="Copy log line"
+                  className="opacity-0 group-hover:opacity-100 p-1 rounded bg-[#1f2129] text-[#71737e] hover:text-white transition-opacity shrink-0 mt-0.5"
+                >
+                  {copiedId === lineId ? (
+                    <Check className="w-3.5 h-3.5 text-[#4ade80]" />
+                  ) : (
+                    <Copy className="w-3.5 h-3.5" />
+                  )}
+                </button>
+              </div>
+            );
+          })
         )}
         <div ref={consoleEndRef} />
       </div>
 
       {/* Quick Command Chips */}
       <div className="px-3 py-1.5 bg-[#17181e] border-t border-[#23242c] flex items-center gap-1.5 overflow-x-auto no-scrollbar">
-        <span className="text-[10px] font-bold uppercase text-[#71737e] mr-1 flex items-center gap-1">
+        <span className="text-[10px] font-bold uppercase text-[#71737e] mr-1 flex items-center gap-1 shrink-0">
           Quick:
         </span>
         {quickCommands.map(qc => (
           <button
             key={qc.cmd}
             onClick={() => onSendCommand(qc.cmd)}
-            className="text-[11px] font-mono px-2 py-0.5 rounded bg-[#202129] hover:bg-[#cd4628] hover:text-white text-[#9ca0b0] border border-[#282a35] transition-colors whitespace-nowrap"
+            className="text-[11px] font-mono px-2.5 py-0.5 rounded bg-[#202129] hover:bg-[#cd4628] hover:text-white text-[#9ca0b0] border border-[#282a35] transition-colors whitespace-nowrap"
           >
             {qc.label}
           </button>
@@ -252,7 +359,7 @@ export default function Console({ logs, onSendCommand, isConnected }) {
             onChange={(e) => setInputCommand(e.target.value)}
             onKeyDown={handleKeyDown}
             disabled={!isConnected}
-            placeholder={isConnected ? "Type a console command (e.g. status, playerlist, say hello)..." : "Server not connected"}
+            placeholder={isConnected ? "Type a console command (e.g. status, say hello, kick player, save)..." : "Server not connected"}
             className="w-full bg-[#0d0e12] text-white font-mono text-sm pl-8 pr-4 py-2 rounded-xl border border-[#282a35] focus:outline-none focus:border-[#cd4628] disabled:opacity-50"
           />
         </div>
