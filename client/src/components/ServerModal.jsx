@@ -2,30 +2,23 @@ import React, { useState, useEffect } from 'react';
 import { Server, Trash2, Key, Globe, Hash } from 'lucide-react';
 
 export default function ServerModal({ isOpen, onClose, serverToEdit, onSave, onDelete }) {
-  const [name, setName] = useState('');
-  const [ip, setIp] = useState('');
-  const [port, setPort] = useState(28016);
-  const [password, setPassword] = useState('');
-  const [isMock, setIsMock] = useState(false);
-  const [autoConnect, setAutoConnect] = useState(false);
+  const [name, setName] = useState(serverToEdit?.name || '');
+  const [ip, setIp] = useState(serverToEdit?.ip || '127.0.0.1');
+  const [port, setPort] = useState(serverToEdit?.port || 28016);
+  const [password, setPassword] = useState(serverToEdit?.password || '');
+  const [isMock, setIsMock] = useState(serverToEdit?.isMock || false);
+  const [autoConnect, setAutoConnect] = useState(serverToEdit?.autoConnect !== false);
 
   useEffect(() => {
-    if (serverToEdit) {
-      setName(serverToEdit.name || '');
-      setIp(serverToEdit.ip || '');
-      setPort(serverToEdit.port || 28016);
-      setPassword(serverToEdit.password || '');
-      setIsMock(serverToEdit.isMock || false);
-      setAutoConnect(serverToEdit.autoConnect || false);
-    } else {
-      setName('My Rust Server');
-      setIp('127.0.0.1');
-      setPort(28016);
-      setPassword('');
-      setIsMock(false);
-      setAutoConnect(true);
+    if (isOpen) {
+      setName(serverToEdit ? serverToEdit.name : '');
+      setIp(serverToEdit ? serverToEdit.ip : '127.0.0.1');
+      setPort(serverToEdit ? serverToEdit.port : 28016);
+      setPassword(serverToEdit ? serverToEdit.password : '');
+      setIsMock(serverToEdit ? serverToEdit.isMock : false);
+      setAutoConnect(serverToEdit ? serverToEdit.autoConnect : true);
     }
-  }, [serverToEdit, isOpen]);
+  }, [isOpen]);
 
   if (!isOpen) return null;
 
@@ -33,8 +26,8 @@ export default function ServerModal({ isOpen, onClose, serverToEdit, onSave, onD
     e.preventDefault();
     onSave({
       id: serverToEdit?.id,
-      name,
-      ip,
+      name: name.trim() || `${ip}:${port}`,
+      ip: ip.trim(),
       port: Number(port) || 28016,
       password,
       isMock,
@@ -45,7 +38,10 @@ export default function ServerModal({ isOpen, onClose, serverToEdit, onSave, onD
 
   return (
     <div className="fixed inset-0 bg-black/80 backdrop-blur-sm z-50 flex items-center justify-center p-4">
-      <div className="bg-[#16171d] rounded-2xl border border-[#2a2c38] p-6 max-w-md w-full shadow-2xl space-y-4">
+      <div 
+        onClick={(e) => e.stopPropagation()} 
+        className="bg-[#16171d] rounded-2xl border border-[#2a2c38] p-6 max-w-md w-full shadow-2xl space-y-4"
+      >
         
         <div className="flex items-center justify-between">
           <div className="flex items-center gap-3">
@@ -62,8 +58,9 @@ export default function ServerModal({ isOpen, onClose, serverToEdit, onSave, onD
 
           {serverToEdit && !serverToEdit.isMock && (
             <button
+              type="button"
               onClick={() => {
-                if (window.confirm('Delete this server profile?')) {
+                if (window.confirm(`Delete server profile "${serverToEdit.name}"?`)) {
                   onDelete(serverToEdit.id);
                   onClose();
                 }
@@ -79,14 +76,18 @@ export default function ServerModal({ isOpen, onClose, serverToEdit, onSave, onD
         <form onSubmit={handleSubmit} className="space-y-4">
           
           <div>
-            <label className="block text-xs font-bold text-[#8e909a] uppercase mb-1">Server Name / Label</label>
+            <label className="block text-xs font-bold text-[#8e909a] uppercase mb-1">
+              Server Name / Label
+            </label>
             <input
               type="text"
-              required
+              autoFocus
+              autoComplete="off"
+              spellCheck={false}
               placeholder="e.g. EU Main 2x Vanilla"
               value={name}
               onChange={(e) => setName(e.target.value)}
-              className="w-full bg-[#0e0f13] text-white text-xs px-3 py-2.5 rounded-xl border border-[#272935] focus:outline-none focus:border-[#cd4628]"
+              className="w-full bg-[#0e0f13] text-white text-xs px-3 py-2.5 rounded-xl border border-[#272935] focus:outline-none focus:border-[#cd4628] transition-colors"
             />
           </div>
 
@@ -98,10 +99,12 @@ export default function ServerModal({ isOpen, onClose, serverToEdit, onSave, onD
               <input
                 type="text"
                 required
+                autoComplete="off"
+                spellCheck={false}
                 placeholder="127.0.0.1 or rust.domain.com"
                 value={ip}
                 onChange={(e) => setIp(e.target.value)}
-                className="w-full bg-[#0e0f13] text-white text-xs font-mono px-3 py-2.5 rounded-xl border border-[#272935] focus:outline-none focus:border-[#cd4628]"
+                className="w-full bg-[#0e0f13] text-white text-xs font-mono px-3 py-2.5 rounded-xl border border-[#272935] focus:outline-none focus:border-[#cd4628] transition-colors"
               />
             </div>
 
@@ -112,9 +115,10 @@ export default function ServerModal({ isOpen, onClose, serverToEdit, onSave, onD
               <input
                 type="number"
                 required
+                autoComplete="off"
                 value={port}
                 onChange={(e) => setPort(e.target.value)}
-                className="w-full bg-[#0e0f13] text-white text-xs font-mono px-3 py-2.5 rounded-xl border border-[#272935] focus:outline-none focus:border-[#cd4628]"
+                className="w-full bg-[#0e0f13] text-white text-xs font-mono px-3 py-2.5 rounded-xl border border-[#272935] focus:outline-none focus:border-[#cd4628] transition-colors"
               />
             </div>
           </div>
@@ -125,10 +129,11 @@ export default function ServerModal({ isOpen, onClose, serverToEdit, onSave, onD
             </label>
             <input
               type="password"
+              autoComplete="off"
               placeholder="rcon.password from server.cfg"
               value={password}
               onChange={(e) => setPassword(e.target.value)}
-              className="w-full bg-[#0e0f13] text-white text-xs font-mono px-3 py-2.5 rounded-xl border border-[#272935] focus:outline-none focus:border-[#cd4628]"
+              className="w-full bg-[#0e0f13] text-white text-xs font-mono px-3 py-2.5 rounded-xl border border-[#272935] focus:outline-none focus:border-[#cd4628] transition-colors"
             />
           </div>
 
@@ -153,18 +158,6 @@ export default function ServerModal({ isOpen, onClose, serverToEdit, onSave, onD
               <span className="text-xs text-[#a0a4b2]">Simulated Demo Mode (Generates live test players & chat)</span>
             </label>
           </div>
-
-          {/* Browser Mixed-Content Notice for GitHub Pages */}
-          {window.location.protocol === 'https:' && (
-            <div className="p-3 rounded-xl bg-[#1e1b15] border border-[#d97706]/40 text-[11px] text-[#fde68a] space-y-1">
-              <div className="font-bold flex items-center gap-1 text-[#fbbf24]">
-                <span>ℹ️ HTTPS / GitHub Pages Notice:</span>
-              </div>
-              <p className="leading-relaxed">
-                If connecting to an unencrypted <code>ws://</code> Rust server from HTTPS, allow <strong>"Insecure content"</strong> in your browser's site settings (click the icon to the left of the URL bar).
-              </p>
-            </div>
-          )}
 
           <div className="flex items-center justify-end gap-2 pt-3 border-t border-[#23252e]">
             <button

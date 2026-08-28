@@ -59,8 +59,23 @@ function createWindow() {
     }
   });
 
-  // Remove default menu for clean gaming look
-  Menu.setApplicationMenu(null);
+  // Standard edit shortcuts (Cut, Copy, Paste, Select All) while keeping menu bar clean/hidden
+  const editMenu = Menu.buildFromTemplate([
+    {
+      label: 'Edit',
+      submenu: [
+        { role: 'undo' },
+        { role: 'redo' },
+        { type: 'separator' },
+        { role: 'cut' },
+        { role: 'copy' },
+        { role: 'paste' },
+        { role: 'selectAll' }
+      ]
+    }
+  ]);
+  Menu.setApplicationMenu(editMenu);
+  mainWindow.setMenuBarVisibility(false);
 
   // Load production dist or local dev server
   const indexPath = path.join(__dirname, '..', 'client', 'dist', 'index.html');
